@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -155,12 +156,7 @@ func (r *Registry) Get(name string) (*Driver, bool) {
 
 // Names returns the sorted driver names.
 func (r *Registry) Names() []string {
-	names := make([]string, 0, len(r.drivers))
-	for n := range r.drivers {
-		names = append(names, n)
-	}
-	slices.Sort(names)
-	return names
+	return slices.Sorted(maps.Keys(r.drivers))
 }
 
 // Load returns the built-in drivers, overridden or extended by every *.yaml

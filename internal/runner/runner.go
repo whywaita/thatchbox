@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -141,7 +142,7 @@ func (r *Runner) save(o outcome, res *Result) error {
 	if before, after := totalSize(old), totalSize(o.files); before > 0 && float64(after) < ratio*float64(before) {
 		return fmt.Errorf("%w (%d -> %d bytes)", ErrShrunk, before, after)
 	}
-	if maps.EqualFunc(old, o.files, func(a, b []byte) bool { return string(a) == string(b) }) {
+	if maps.EqualFunc(old, o.files, bytes.Equal) {
 		return nil
 	}
 	if err := r.Repo.WriteDevice(o.dev.Name, o.files); err != nil {
