@@ -1,0 +1,28 @@
+# NEC UNIVERGE IX. Checked against an IX2215 (10.2.x): the login prompt is
+# "host#", and show running-config exists only in configuration mode
+# (enable-config, "host(config)#"). Paging cannot be turned off, so the
+# pager is answered. The configuration has no end marker.
+name: nec_ix
+prompt: '^[\w.\-]+(?:\([\w.\-]+\))?[#>]\s*$'
+enable:
+  when: '^[\w.\-]+[#>]\s*$'
+  command: enable-config
+  password_prompt: '(?i)password:\s*$'
+pager:
+  pattern: '\s*--More--\s*$'
+  send: ' '
+error: '^% '
+drop:
+  - '^! Current time '
+mask:
+  - '^\s*username \S+ password(?: (?:plain|hash|secret))? (?P<secret>\S+)'
+  - '^\s*ike policy \S+ .*?\bkey (?P<secret>\S+)'
+  - '^\s*ike (?:pre-shared-)?key (?P<secret>\S+)'
+  - '^\s*ipsec .*?\bkey (?P<secret>\S+)'
+  - '^\s*(?:ppp )?authentication password \S+ (?P<secret>\S+)'
+  - '^\s*snmp-agent ip community (?P<secret>\S+)'
+  - '^\s*(?:radius-server|tacacs-server) .*?\bkey (?P<secret>\S+)'
+  - '^\s*(?:enable-)?password(?: (?:plain|hash|secret))? (?P<secret>\S+)'
+outputs:
+  - path: running-config
+    command: show running-config

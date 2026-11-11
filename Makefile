@@ -1,0 +1,9 @@
+.PHONY: test build check
+test:
+	go test -race ./...
+build:
+	go build -trimpath -o thatchbox ./cmd/thatchbox
+check:
+	test -z "$$(gofmt -l cmd internal tests)"
+	go vet ./...
+	go test -race ./...

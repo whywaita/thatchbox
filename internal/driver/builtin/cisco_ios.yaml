@@ -1,0 +1,42 @@
+# Cisco IOS / IOS-XE.
+name: cisco_ios
+prompt: '^[\w.\-@/:]+(\([\w.\-]+\))?[>#]\s*$'
+enable:
+  when: '>\s*$'
+  command: enable
+  password_prompt: '(?i)^password:\s*$'
+setup:
+  - terminal length 0
+  - terminal width 0
+pager:
+  pattern: '\s*--More--\s*$'
+  send: ' '
+error: '^% (Invalid|Incomplete|Ambiguous|Unknown|Unrecognized|Error|Authorization failed)'
+drop:
+  - '^Building configuration\.\.\.$'
+  - '^Current configuration\s*:\s*\d+ bytes$'
+  - '^! Last configuration change at '
+  - '^! NVRAM config last updated at '
+  - '^! No configuration change since last restart'
+  - '^ntp clock-period \d+$'
+mask:
+  - '^\s*enable (?:secret|password)(?: level \d+)?(?: \d+)? (?P<secret>\S+)'
+  - '^\s*username \S+ .*?(?:secret|password)(?: \d+)? (?P<secret>\S+)'
+  - '^\s*(?:password|secret)(?: \d+)? (?P<secret>\S+)'
+  - '^\s*snmp-server community (?P<secret>\S+)'
+  - '^\s*snmp-server host \S+(?: informs| traps)?(?: version (?:1|2c))? (?P<secret>\S+)'
+  - '^\s*snmp-server user \S+ \S+ v3 .*?\bauth \S+ (?P<secret>\S+)'
+  - '^\s*snmp-server user \S+ \S+ v3 .*?\bpriv \S+(?: \d+)? (?P<secret>\S+)'
+  - '^\s*crypto isakmp key(?: \d)? (?P<secret>\S+)'
+  - '^\s*pre-shared-key(?: (?:local|remote))?(?: \d)? (?P<secret>\S+)'
+  - '^\s*key-string(?: \d)? (?P<secret>\S+)'
+  - '^\s*key(?: \d)? (?P<secret>\S+)$'
+  - '^\s*(?:tacacs-server|radius-server) .*?\bkey(?: \d)? (?P<secret>\S+)'
+  - '^\s*neighbor \S+ password(?: \d)? (?P<secret>\S+)'
+  - '^\s*ip ospf (?:authentication-key|message-digest-key \d+ md5)(?: \d)? (?P<secret>\S+)'
+  - '^\s*(?:ppp|ip) (?:chap|pap) (?:password|sent-username \S+ password)(?: \d)? (?P<secret>\S+)'
+  - '^\s*wpa-psk ascii(?: \d)? (?P<secret>\S+)'
+outputs:
+  - path: running-config
+    command: show running-config
+    end: '^end$'

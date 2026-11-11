@@ -1,0 +1,4 @@
+/thatchbox
+known_hosts
+*.key
+id_*

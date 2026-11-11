@@ -1,0 +1,66 @@
+# Example inventory. Addresses are from the documentation ranges.
+# Secret values are never written here: use {env: NAME} or {file: PATH}.
+defaults:
+  concurrency: 8
+  timeout: 2m
+  known_hosts: /etc/thatchbox/known_hosts
+  # Reject a collection smaller than half of the stored version.
+  min_size_ratio: 0.5
+
+credentials:
+  netadmin:
+    username: backup
+    password: {file: /var/run/secrets/thatchbox/netadmin-password}
+    enable_password: {file: /var/run/secrets/thatchbox/netadmin-enable}
+  bastion:
+    username: {env: THATCHBOX_BASTION_USER}
+    private_key: {file: /var/run/secrets/thatchbox/bastion-key}
+    private_key_passphrase: {file: /var/run/secrets/thatchbox/bastion-key-passphrase}
+  # Password and key together: either is accepted, and servers that require
+  # both get the key first and then the password.
+  netadmin-key:
+    username: backup
+    password: {file: /var/run/secrets/thatchbox/netadmin-password}
+    private_key: {file: /var/run/secrets/thatchbox/netadmin-key}
+
+  # A vty line password for telnet: no username.
+  vty:
+    password: {file: /var/run/secrets/thatchbox/vty-password}
+    enable_password: {file: /var/run/secrets/thatchbox/netadmin-enable}
+
+jump_hosts:
+  dc-bastion:
+    address: bastion.example.net
+    credential: bastion
+
+devices:
+  - name: core-sw1
+    address: 192.0.2.10
+    driver: cisco_ios
+    credential: netadmin
+  - name: old-sw2
+    address: 192.0.2.11
+    driver: cisco_ios
+    credential: netadmin
+    # Legacy algorithms are opt-in per device. "+" appends to the defaults.
+    ssh:
+      kex: ["+diffie-hellman-group1-sha1"]
+      ciphers: ["+aes128-cbc"]
+      host_key_algorithms: ["+ssh-rsa"]
+  # Telnet is cleartext; only for devices without usable SSH. Port 23.
+  - name: legacy-sw3
+    address: 192.0.2.12
+    driver: cisco_ios
+    credential: vty
+    transport: telnet
+  - name: edge-r1
+    address: 198.51.100.1
+    driver: junos
+    credential: netadmin
+    jump: dc-bastion
+    timeout: 5m
+  - name: branch-ix
+    address: 192.0.2.20
+    driver: nec_ix
+    credential: netadmin
+    enabled: false

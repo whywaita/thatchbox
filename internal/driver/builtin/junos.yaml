@@ -1,0 +1,22 @@
+# Juniper Junos. Log in as a non-root user so the session starts in the CLI.
+name: junos
+prompt: '^(?:[\w.\-]+@)?[\w.\-]+[>#]\s*$'
+setup:
+  - set cli screen-length 0
+  - set cli screen-width 0
+pager:
+  pattern: '---\(more[^)]*\)---\s*$'
+  send: ' '
+error: '^(?:error|syntax error|unknown command)'
+drop:
+  - '^## Last commit: '
+  - '^## Last changed: '
+  - '^\{(?:master|backup|primary|secondary|linecard)(?::\d+)?\}$'
+mask:
+  - '"(?P<secret>[^"]*)";\s*## SECRET-DATA'
+  - '^\s*(?:encrypted-password|secret|authentication-key|simple-password|pre-shared-key (?:ascii-text|hexadecimal)) "?(?P<secret>[^";\s]+)'
+  - '^\s*community (?P<secret>\S+)\s*(?:\{|;|$)'
+outputs:
+  - path: configuration
+    command: show configuration | no-more
+    end: '^\}$'
