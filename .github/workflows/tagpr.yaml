@@ -1,33 +1,42 @@
-name: release
+name: tagpr
 
-# Push a tag such as v1.2.3 to publish a GitHub release with binaries and
-# the image ghcr.io/whywaita/thatchbox:{1.2.3,1.2,latest}.
+# tagpr keeps a release pull request open for unreleased changes on main.
+# Merging it tags vX.Y.Z and creates the GitHub release; this workflow then
+# publishes the image ghcr.io/whywaita/thatchbox:{X.Y.Z,X.Y,latest} and
+# attaches the binaries. Tags pushed with GITHUB_TOKEN start no other
+# workflow, so the release steps run here.
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: tagpr
   cancel-in-progress: false
 
 jobs:
-  test:
+  tagpr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+    outputs:
+      tag: ${{ steps.tagpr.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - run: make check
+      - uses: Songmu/tagpr@047aec4b6c0ce166f52958b5a97f5a3d927fd65b # v1.22.0
+        id: tagpr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   image:
-    needs: [test]
+    needs: [tagpr]
+    if: needs.tagpr.outputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,6 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.tagpr.outputs.tag }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -42,8 +52,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.tagpr.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.tagpr.outputs.tag }}
+            type=raw,value=latest
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -54,18 +65,20 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ needs.tagpr.outputs.tag }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  release:
-    needs: [test]
+  binaries:
+    needs: [tagpr]
+    if: needs.tagpr.outputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.tagpr.outputs.tag }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -73,13 +86,10 @@ jobs:
           cache: false
       - name: Build binaries
         env:
-          VERSION: ${{ github.ref_name }}
-        run: make dist VERSION="$VERSION"
-      - name: Create release
+          TAG: ${{ needs.tagpr.outputs.tag }}
+        run: make dist VERSION="$TAG"
+      - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          prerelease=()
-          case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${prerelease[@]}" dist/*
+          TAG: ${{ needs.tagpr.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

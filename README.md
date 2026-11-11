@@ -163,7 +163,7 @@ Go 1.26 or newer is required.
 
 ## Releases
 
-Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yaml`: the tests, a GitHub release with the archives from `make dist`, and the multi-platform image on ghcr.io. A tag with a suffix (`v1.0.0-rc.1`) makes a prerelease. CI (`.github/workflows/ci.yaml`) builds the image on pull requests and publishes `main` and `sha-<commit>` from the main branch.
+Releases are cut with [tagpr](https://github.com/Songmu/tagpr). On every push to main, `.github/workflows/tagpr.yaml` keeps a release pull request open that updates `CHANGELOG.md` and proposes the next version (patch by default; label a merged pull request `minor` or `major` for a larger bump). Merging the release pull request tags `vX.Y.Z`, creates the GitHub release, attaches the archives from `make dist`, and publishes the multi-platform image to ghcr.io. CI (`.github/workflows/ci.yaml`) builds the image on pull requests and publishes `main` and `sha-<commit>` from the main branch.
 
 ## License
 
