@@ -23,6 +23,7 @@ type sshServer struct {
 	addr    string
 	hostKey ssh.PublicKey
 	device  *fakeDevice
+	opts    sshServerOptions
 
 	mu       sync.Mutex
 	forwards int
@@ -35,6 +36,7 @@ type sshServerOptions struct {
 	device         *fakeDevice
 	ciphers        []string // restrict server ciphers
 	allowForward   bool
+	rejectPTY      bool // refuse pty-req, as a device without a shell would
 	// rejectKeyboardInteractive offers keyboard-interactive and rejects it
 	// without sending any question, as some Cisco IOS versions do.
 	rejectKeyboardInteractive bool
@@ -83,7 +85,7 @@ func startSSHServer(t *testing.T, o sshServerOptions) *sshServer {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
-	s := &sshServer{addr: ln.Addr().String(), hostKey: signer.PublicKey(), device: o.device}
+	s := &sshServer{addr: ln.Addr().String(), hostKey: signer.PublicKey(), device: o.device, opts: o}
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -134,7 +136,7 @@ func (s *sshServer) session(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	for r := range reqs {
 		switch r.Type {
 		case "pty-req":
-			_ = r.Reply(true, nil)
+			_ = r.Reply(!s.opts.rejectPTY, nil)
 		case "shell":
 			_ = r.Reply(true, nil)
 			go s.device.serve(ch)
