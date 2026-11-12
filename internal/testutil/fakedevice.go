@@ -1,4 +1,4 @@
-package tests
+package testutil
 
 import (
 	"bufio"
@@ -7,21 +7,21 @@ import (
 	"sync"
 )
 
-// fakeDevice imitates a CLI behind a PTY: it echoes input, prints a prompt,
+// FakeDevice imitates a CLI behind a PTY: it echoes input, prints a prompt,
 // optionally requires enable, and can page or stall its output.
-type fakeDevice struct {
-	hostname       string
-	banner         string
-	enablePassword string // non-empty: start unprivileged ("host>")
-	enableCommand  string // non-empty: start unprivileged; this command enters privileged mode (default "enable")
-	privCommands   bool   // commands are rejected until privileged mode
-	privSuffix     string // default "#"
-	userSuffix     string // default ">"
-	commands       map[string]string
-	pageEvery      int    // >0: insert a pager prompt every N lines until "terminal length 0"
-	pagerErase     string // what erases the pager prompt (default: Cisco style)
-	stallOn        string // command after which the device never prints a prompt again
-	dropOn         string // command after which the device closes mid-output
+type FakeDevice struct {
+	Hostname       string
+	Banner         string
+	EnablePassword string // non-empty: start unprivileged ("host>")
+	EnableCommand  string // non-empty: start unprivileged; this command enters privileged mode (default "enable")
+	PrivCommands   bool   // commands are rejected until privileged mode
+	PrivSuffix     string // default "#"
+	UserSuffix     string // default ">"
+	Commands       map[string]string
+	PageEvery      int    // >0: insert a pager prompt every N lines until "terminal length 0"
+	PagerErase     string // what erases the pager prompt (default: Cisco style)
+	StallOn        string // command after which the device never prints a prompt again
+	DropOn         string // command after which the device closes mid-output
 
 	mu       sync.Mutex
 	received []string
@@ -29,11 +29,11 @@ type fakeDevice struct {
 
 const fakePager = " --More-- "
 
-func (f *fakeDevice) prompt(priv bool) string {
+func (f *FakeDevice) prompt(priv bool) string {
 	if priv {
-		return f.hostname + cmp(f.privSuffix, "#")
+		return f.Hostname + cmp(f.PrivSuffix, "#")
 	}
-	return f.hostname + cmp(f.userSuffix, ">")
+	return f.Hostname + cmp(f.UserSuffix, ">")
 }
 
 func cmp(v, def string) string {
@@ -44,22 +44,22 @@ func cmp(v, def string) string {
 }
 
 // Received returns the commands the device saw.
-func (f *fakeDevice) Received() []string {
+func (f *FakeDevice) Received() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.received...)
 }
 
-func (f *fakeDevice) serve(rw io.ReadWriteCloser) {
+func (f *FakeDevice) serve(rw io.ReadWriteCloser) {
 	defer rw.Close()
 	r := bufio.NewReader(rw)
 	w := func(s string) bool {
 		_, err := io.WriteString(rw, s)
 		return err == nil
 	}
-	priv := f.enablePassword == "" && f.enableCommand == ""
-	paging := f.pageEvery > 0
-	if !w(f.banner + "\r\n" + f.prompt(priv)) {
+	priv := f.EnablePassword == "" && f.EnableCommand == ""
+	paging := f.PageEvery > 0
+	if !w(f.Banner + "\r\n" + f.prompt(priv)) {
 		return
 	}
 	for {
@@ -74,9 +74,9 @@ func (f *fakeDevice) serve(rw io.ReadWriteCloser) {
 			return
 		}
 		switch {
-		case line == cmp(f.enableCommand, "enable") && !priv && f.enablePassword == "":
+		case line == cmp(f.EnableCommand, "enable") && !priv && f.EnablePassword == "":
 			priv = true
-		case line == cmp(f.enableCommand, "enable") && !priv:
+		case line == cmp(f.EnableCommand, "enable") && !priv:
 			if !w("Password: ") {
 				return
 			}
@@ -84,7 +84,7 @@ func (f *fakeDevice) serve(rw io.ReadWriteCloser) {
 			if err != nil {
 				return
 			}
-			if pw == f.enablePassword {
+			if pw == f.EnablePassword {
 				priv = true
 			} else if !w("\r\n% Access denied\r\n") {
 				return
@@ -93,13 +93,13 @@ func (f *fakeDevice) serve(rw io.ReadWriteCloser) {
 			paging = false
 		case line == "exit":
 			return
-		case line == f.dropOn:
-			out := f.commands[line]
+		case line == f.DropOn:
+			out := f.Commands[line]
 			w(strings.ReplaceAll(out[:len(out)/2], "\n", "\r\n"))
 			return
 		default:
-			out, ok := f.commands[line]
-			if !ok || (f.privCommands && !priv) {
+			out, ok := f.Commands[line]
+			if !ok || (f.PrivCommands && !priv) {
 				if !w("% Invalid input detected at '^' marker.\r\n") {
 					return
 				}
@@ -108,7 +108,7 @@ func (f *fakeDevice) serve(rw io.ReadWriteCloser) {
 			if !f.writePaged(rw, r, out, paging) {
 				return
 			}
-			if line == f.stallOn {
+			if line == f.StallOn {
 				_, _ = io.Copy(io.Discard, r)
 				return
 			}
@@ -122,17 +122,17 @@ func (f *fakeDevice) serve(rw io.ReadWriteCloser) {
 	}
 }
 
-func (f *fakeDevice) writePaged(w io.Writer, r *bufio.Reader, out string, paging bool) bool {
+func (f *FakeDevice) writePaged(w io.Writer, r *bufio.Reader, out string, paging bool) bool {
 	lines := strings.SplitAfter(out, "\n")
 	for i, l := range lines {
-		if paging && i > 0 && i%f.pageEvery == 0 {
+		if paging && i > 0 && i%f.PageEvery == 0 {
 			if _, err := io.WriteString(w, fakePager); err != nil {
 				return false
 			}
 			if _, err := r.ReadByte(); err != nil {
 				return false
 			}
-			if _, err := io.WriteString(w, cmp(f.pagerErase, "\b\b\b\b\b\b\b\b\b\b          \b\b\b\b\b\b\b\b\b\b")); err != nil {
+			if _, err := io.WriteString(w, cmp(f.PagerErase, "\b\b\b\b\b\b\b\b\b\b          \b\b\b\b\b\b\b\b\b\b")); err != nil {
 				return false
 			}
 		}
@@ -178,8 +178,8 @@ func (p *pipeConn) Close() error {
 	return nil
 }
 
-// connect starts the device and returns the client side.
-func (f *fakeDevice) connect() io.ReadWriteCloser {
+// Connect starts the device and returns the client side.
+func (f *FakeDevice) Connect() io.ReadWriteCloser {
 	cr, dw := io.Pipe()
 	dr, cw := io.Pipe()
 	device := &pipeConn{Reader: dr, Writer: dw, closers: []io.Closer{dr, dw}}

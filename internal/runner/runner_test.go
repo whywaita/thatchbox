@@ -1,4 +1,4 @@
-package tests
+package runner_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/whywaita/thatchbox/internal/runner"
 	"github.com/whywaita/thatchbox/internal/shell"
 	"github.com/whywaita/thatchbox/internal/store"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 // fakeCollector returns canned files per device.
@@ -57,7 +58,7 @@ func newRunner(t *testing.T, remote string, c runner.Collector, devs []inventory
 		Devices:     devs,
 		Concurrency: 2,
 		Collector:   c,
-		Repo:        openStore(t, remote),
+		Repo:        testutil.OpenStore(t, remote),
 		Now:         func() time.Time { return time.Date(2026, 11, 11, 3, 0, 0, 0, time.UTC) },
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -68,7 +69,7 @@ func bigConfig(n int) []byte {
 }
 
 func TestRunnerPartialFailureStillPushes(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{
 		files: map[string]map[string][]byte{
 			"sw1": {"running-config": bigConfig(10)},
@@ -83,7 +84,7 @@ func TestRunnerPartialFailureStillPushes(t *testing.T) {
 	if !res.Committed || len(res.Failed) != 1 || res.Failed[0] != "r1" {
 		t.Fatalf("unexpected result %+v", res)
 	}
-	repo := openStore(t, remote)
+	repo := testutil.OpenStore(t, remote)
 	files, _ := repo.ReadDevice("sw2")
 	if string(files["running-config"]) != string(bigConfig(20)) {
 		t.Fatalf("sw2 not pushed: %v", files)
@@ -101,7 +102,7 @@ func TestRunnerPartialFailureStillPushes(t *testing.T) {
 }
 
 func TestRunnerSkipsEmptyCommits(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {"running-config": bigConfig(10)}}}
 	if _, err := newRunner(t, remote, c, devices("sw1")).Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -115,13 +116,13 @@ func TestRunnerSkipsEmptyCommits(t *testing.T) {
 	if res.Committed {
 		t.Fatal("unchanged run must not commit")
 	}
-	if n := len(remoteCommits(t, remote)); n != 1 {
+	if n := len(testutil.RemoteCommits(t, remote)); n != 1 {
 		t.Fatalf("remote has %d commits", n)
 	}
 }
 
 func TestRunnerRejectsShrunkOutputAndKeepsPrevious(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {"running-config": bigConfig(100)}}}
 	if _, err := newRunner(t, remote, c, devices("sw1")).Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -134,7 +135,7 @@ func TestRunnerRejectsShrunkOutputAndKeepsPrevious(t *testing.T) {
 	if len(res.Failed) != 1 {
 		t.Fatalf("shrink not detected: %+v", res)
 	}
-	repo := openStore(t, remote)
+	repo := testutil.OpenStore(t, remote)
 	files, _ := repo.ReadDevice("sw1")
 	if string(files["running-config"]) != string(bigConfig(100)) {
 		t.Fatal("previous config was overwritten")
@@ -146,7 +147,7 @@ func TestRunnerRejectsShrunkOutputAndKeepsPrevious(t *testing.T) {
 }
 
 func TestRunnerCommitsStateTransitionOnly(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {"running-config": bigConfig(10)}}}
 	if _, err := newRunner(t, remote, c, devices("sw1")).Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -167,14 +168,14 @@ func TestRunnerCommitsStateTransitionOnly(t *testing.T) {
 	if res.Committed {
 		t.Fatal("repeated failure must not commit")
 	}
-	st, _ := openStore(t, remote).ReadStatus()
+	st, _ := testutil.OpenStore(t, remote).ReadStatus()
 	if st.Devices["sw1"].LastSuccess == nil {
 		t.Fatal("last_success lost on failure")
 	}
 }
 
 func TestRunnerSkipsDisabledDevices(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {"running-config": bigConfig(10)}}}
 	devs := devices("sw1", "off")
 	disabled := false
@@ -189,7 +190,7 @@ func TestRunnerSkipsDisabledDevices(t *testing.T) {
 }
 
 func TestRunnerReportsChangedDevicesInCommit(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{
 		"sw1": {"running-config": bigConfig(10)},
 		"sw2": {"running-config": bigConfig(10)},
@@ -205,7 +206,7 @@ func TestRunnerReportsChangedDevicesInCommit(t *testing.T) {
 	if len(res.Changed) != 1 || res.Changed[0] != "sw2" {
 		t.Fatalf("changed = %v", res.Changed)
 	}
-	msg := remoteCommits(t, remote)[0].Message
+	msg := testutil.RemoteCommits(t, remote)[0].Message
 	if !strings.Contains(msg, "sw2") || strings.Contains(msg, "sw1") {
 		t.Fatalf("commit message %q", msg)
 	}

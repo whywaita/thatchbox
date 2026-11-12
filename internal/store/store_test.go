@@ -1,78 +1,24 @@
-package tests
+package store_test
 
 import (
 	"context"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/client"
 	"github.com/go-git/go-git/v5/plumbing/transport/file"
 
 	"github.com/whywaita/thatchbox/internal/store"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
-func newRemote(t *testing.T) string {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), "remote.git")
-	if _, err := git.PlainInit(dir, true); err != nil {
-		t.Fatal(err)
-	}
-	return dir
-}
-
-func openStore(t *testing.T, remote string) *store.Repo {
-	t.Helper()
-	return openStoreDepth(t, remote, 0)
-}
-
-func openStoreDepth(t *testing.T, remote string, depth int) *store.Repo {
-	t.Helper()
-	r, err := store.Clone(context.Background(), store.Options{
-		Depth:       depth,
-		URL:         remote,
-		Dir:         filepath.Join(t.TempDir(), "work"),
-		Branch:      "main",
-		AuthorName:  "thatchbox",
-		AuthorEmail: "thatchbox@example.invalid",
-	})
-	if err != nil {
-		t.Fatalf("Clone: %v", err)
-	}
-	return r
-}
-
-func remoteCommits(t *testing.T, remote string) []*object.Commit {
-	t.Helper()
-	repo, err := git.PlainOpen(remote)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref, err := repo.Reference("refs/heads/main", true)
-	if err != nil {
-		t.Fatalf("main branch: %v", err)
-	}
-	iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []*object.Commit
-	_ = iter.ForEach(func(c *object.Commit) error {
-		out = append(out, c)
-		return nil
-	})
-	return out
-}
-
 func TestStoreRoundTripFromEmptyRemote(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	ctx := context.Background()
 
-	r := openStore(t, remote)
+	r := testutil.OpenStore(t, remote)
 	if files, err := r.ReadDevice("sw1"); err != nil || len(files) != 0 {
 		t.Fatalf("empty remote: %v %v", files, err)
 	}
@@ -88,7 +34,7 @@ func TestStoreRoundTripFromEmptyRemote(t *testing.T) {
 	}
 
 	// Second run: shallow clone of existing history.
-	r2 := openStore(t, remote)
+	r2 := testutil.OpenStore(t, remote)
 	files, err := r2.ReadDevice("sw1")
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +52,7 @@ func TestStoreRoundTripFromEmptyRemote(t *testing.T) {
 		t.Fatalf("Push from shallow clone: %v", err)
 	}
 
-	r3 := openStore(t, remote)
+	r3 := testutil.OpenStore(t, remote)
 	files, err = r3.ReadDevice("sw1")
 	if err != nil {
 		t.Fatal(err)
@@ -114,17 +60,17 @@ func TestStoreRoundTripFromEmptyRemote(t *testing.T) {
 	if len(files) != 1 || string(files["running-config"]) != "a2\n" {
 		t.Fatalf("stale file not removed: %v", files)
 	}
-	if n := len(remoteCommits(t, remote)); n != 2 {
+	if n := len(testutil.RemoteCommits(t, remote)); n != 2 {
 		t.Fatalf("remote has %d commits", n)
 	}
 }
 
 // The container image has no git binary: local remotes must work without it.
 func TestStoreWorksWithoutGitBinary(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	t.Setenv("PATH", t.TempDir())
 	for i, content := range []string{"a\n", "b\n"} {
-		r := openStore(t, remote)
+		r := testutil.OpenStore(t, remote)
 		if err := r.WriteDevice("sw1", map[string][]byte{"cfg": []byte(content)}); err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +81,7 @@ func TestStoreWorksWithoutGitBinary(t *testing.T) {
 			t.Fatalf("push %d without git binary: %v", i, err)
 		}
 	}
-	if n := len(remoteCommits(t, remote)); n != 2 {
+	if n := len(testutil.RemoteCommits(t, remote)); n != 2 {
 		t.Fatalf("remote has %d commits", n)
 	}
 }
@@ -151,9 +97,9 @@ func TestStoreShallowClonePush(t *testing.T) {
 	client.InstallProtocol("file", file.DefaultClient)
 	t.Cleanup(func() { client.InstallProtocol("file", orig) })
 
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	for i := range 3 {
-		r := openStoreDepth(t, remote, store.ShallowDepth)
+		r := testutil.OpenStoreDepth(t, remote, store.ShallowDepth)
 		if err := r.WriteDevice("sw1", map[string][]byte{"cfg": []byte(strings.Repeat("x", i+1))}); err != nil {
 			t.Fatal(err)
 		}
@@ -164,14 +110,14 @@ func TestStoreShallowClonePush(t *testing.T) {
 			t.Fatalf("push %d from shallow clone: %v", i, err)
 		}
 	}
-	if n := len(remoteCommits(t, remote)); n != 3 {
+	if n := len(testutil.RemoteCommits(t, remote)); n != 3 {
 		t.Fatalf("remote has %d commits", n)
 	}
 }
 
 func TestStoreNoChangeNoCommit(t *testing.T) {
-	remote := newRemote(t)
-	r := openStore(t, remote)
+	remote := testutil.NewRemote(t)
+	r := testutil.OpenStore(t, remote)
 	if err := r.WriteDevice("sw1", map[string][]byte{"cfg": []byte("x\n")}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +127,7 @@ func TestStoreNoChangeNoCommit(t *testing.T) {
 	if err := r.Push(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	r2 := openStore(t, remote)
+	r2 := testutil.OpenStore(t, remote)
 	if err := r2.WriteDevice("sw1", map[string][]byte{"cfg": []byte("x\n")}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +140,7 @@ func TestStoreNoChangeNoCommit(t *testing.T) {
 }
 
 func TestStoreRejectsUnsafeNames(t *testing.T) {
-	r := openStore(t, newRemote(t))
+	r := testutil.OpenStore(t, testutil.NewRemote(t))
 	if err := r.WriteDevice("../escape", map[string][]byte{"cfg": nil}); err == nil {
 		t.Fatal("device name traversal accepted")
 	}
@@ -204,8 +150,8 @@ func TestStoreRejectsUnsafeNames(t *testing.T) {
 }
 
 func TestStoreStatusRoundTrip(t *testing.T) {
-	remote := newRemote(t)
-	r := openStore(t, remote)
+	remote := testutil.NewRemote(t)
+	r := testutil.OpenStore(t, remote)
 	st, err := r.ReadStatus()
 	if err != nil || len(st.Devices) != 0 {
 		t.Fatalf("empty status: %v %v", st, err)
@@ -221,7 +167,7 @@ func TestStoreStatusRoundTrip(t *testing.T) {
 	if err := r.Push(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	got, err := openStore(t, remote).ReadStatus()
+	got, err := testutil.OpenStore(t, remote).ReadStatus()
 	if err != nil {
 		t.Fatal(err)
 	}

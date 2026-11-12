@@ -1,4 +1,4 @@
-package tests
+package sshdial_test
 
 import (
 	"context"
@@ -10,15 +10,12 @@ import (
 	"github.com/whywaita/thatchbox/internal/inventory"
 	"github.com/whywaita/thatchbox/internal/shell"
 	"github.com/whywaita/thatchbox/internal/sshdial"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
-func simpleDevice() *fakeDevice {
-	return &fakeDevice{hostname: "sw1", commands: map[string]string{"show running-config": ciscoRunning}}
-}
-
-func target(t *testing.T, s *sshServer, knownHosts string) sshdial.Target {
+func target(t *testing.T, s *testutil.SSHServer, knownHosts string) sshdial.Target {
 	t.Helper()
-	h, p := hostPort(t, s.addr)
+	h, p := testutil.HostPort(t, s.Addr)
 	return sshdial.Target{Host: h, Port: p, Username: "backup", Password: "pw", KnownHosts: knownHosts}
 }
 
@@ -28,7 +25,7 @@ func runShowRun(t *testing.T, ctx context.Context, tgt sshdial.Target, jump *ssh
 	if err != nil {
 		return "", err
 	}
-	s, err := shell.Open(ctx, conn, ciscoDriver(t), "")
+	s, err := shell.Open(ctx, conn, testutil.CiscoDriver(t), "")
 	if err != nil {
 		return "", err
 	}
@@ -37,10 +34,10 @@ func runShowRun(t *testing.T, ctx context.Context, tgt sshdial.Target, jump *ssh
 }
 
 func TestSSHCollectsOverPasswordAuth(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	out, err := runShowRun(t, ctx, target(t, srv, writeKnownHosts(t, srv)), nil)
+	out, err := runShowRun(t, ctx, target(t, srv, testutil.WriteKnownHosts(t, srv)), nil)
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -50,26 +47,26 @@ func TestSSHCollectsOverPasswordAuth(t *testing.T) {
 }
 
 func TestSSHRejectsUnknownHostKey(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	other := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	other := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
 	// known_hosts holds a different server's key under this address.
-	kh := writeKnownHosts(t, &sshServer{addr: srv.addr, hostKey: other.hostKey})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	kh := testutil.WriteKnownHosts(t, &testutil.SSHServer{Addr: srv.Addr, HostKey: other.HostKey})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	_, err := sshdial.Open(ctx, target(t, srv, kh), nil)
 	if !errors.Is(err, sshdial.ErrHostKey) {
 		t.Fatalf("want ErrHostKey, got %v", err)
 	}
 	// An address missing from known_hosts is rejected as well.
-	_, err = sshdial.Open(ctx, target(t, srv, writeKnownHosts(t, other)), nil)
+	_, err = sshdial.Open(ctx, target(t, srv, testutil.WriteKnownHosts(t, other)), nil)
 	if !errors.Is(err, sshdial.ErrHostKey) {
 		t.Fatalf("want ErrHostKey for unknown host, got %v", err)
 	}
 }
 
 func TestSSHRequiresKnownHosts(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	if _, err := sshdial.Open(ctx, target(t, srv, ""), nil); err == nil {
 		t.Fatal("expected error without known_hosts")
@@ -77,10 +74,10 @@ func TestSSHRequiresKnownHosts(t *testing.T) {
 }
 
 func TestSSHWrongPassword(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "right", device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "right", Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	_, err := sshdial.Open(ctx, target(t, srv, writeKnownHosts(t, srv)), nil)
+	_, err := sshdial.Open(ctx, target(t, srv, testutil.WriteKnownHosts(t, srv)), nil)
 	if !errors.Is(err, sshdial.ErrAuth) {
 		t.Fatalf("want ErrAuth, got %v", err)
 	}
@@ -89,10 +86,10 @@ func TestSSHWrongPassword(t *testing.T) {
 // Seen on a Catalyst 3560: password fails, then keyboard-interactive fails
 // without a question, which x/crypto reports as an unexpected message.
 func TestSSHWrongPasswordKeyboardInteractiveRejected(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "right", rejectKeyboardInteractive: true, device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "right", RejectKeyboardInteractive: true, Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	_, err := sshdial.Open(ctx, target(t, srv, writeKnownHosts(t, srv)), nil)
+	_, err := sshdial.Open(ctx, target(t, srv, testutil.WriteKnownHosts(t, srv)), nil)
 	if !errors.Is(err, sshdial.ErrAuth) {
 		t.Fatalf("want ErrAuth, got %v", err)
 	}
@@ -105,29 +102,29 @@ func TestSSHConnectionRefused(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	ln.Close()
-	h, p := hostPort(t, addr)
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	h, p := testutil.HostPort(t, addr)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	_, err = sshdial.Open(ctx, sshdial.Target{Host: h, Port: p, Username: "u", Password: "p", KnownHosts: writeKnownHosts(t)}, nil)
+	_, err = sshdial.Open(ctx, sshdial.Target{Host: h, Port: p, Username: "u", Password: "p", KnownHosts: testutil.WriteKnownHosts(t)}, nil)
 	if !errors.Is(err, sshdial.ErrConnect) {
 		t.Fatalf("want ErrConnect, got %v", err)
 	}
 }
 
 func TestSSHDeadlineIsTimeoutNotConnect(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := sshdial.Open(ctx, target(t, srv, writeKnownHosts(t, srv)), nil)
+	_, err := sshdial.Open(ctx, target(t, srv, testutil.WriteKnownHosts(t, srv)), nil)
 	if errors.Is(err, sshdial.ErrConnect) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context error, got %v", err)
 	}
 }
 
 func TestSSHLegacyCipherIsOptIn(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice(), ciphers: []string{"aes128-cbc"}})
-	kh := writeKnownHosts(t, srv)
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice(), Ciphers: []string{"aes128-cbc"}})
+	kh := testutil.WriteKnownHosts(t, srv)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	if _, err := sshdial.Open(ctx, target(t, srv, kh), nil); err == nil {
 		t.Fatal("CBC must not be offered by default")
@@ -140,10 +137,10 @@ func TestSSHLegacyCipherIsOptIn(t *testing.T) {
 }
 
 func TestSSHRejectsUnknownAlgorithm(t *testing.T) {
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	tgt := target(t, srv, writeKnownHosts(t, srv))
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	tgt := target(t, srv, testutil.WriteKnownHosts(t, srv))
 	tgt.Algorithms = inventory.SSH{KeyExchanges: []string{"+no-such-kex"}}
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	if _, err := sshdial.Open(ctx, tgt, nil); err == nil || !strings.Contains(err.Error(), "no-such-kex") {
 		t.Fatalf("want unknown algorithm error, got %v", err)
@@ -151,12 +148,12 @@ func TestSSHRejectsUnknownAlgorithm(t *testing.T) {
 }
 
 func TestSSHThroughJumpHost(t *testing.T) {
-	dev := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	jump := startSSHServer(t, sshServerOptions{user: "jumper", password: "jpw", allowForward: true})
-	kh := writeKnownHosts(t, dev, jump)
+	dev := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	jump := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "jumper", Password: "jpw", AllowForward: true})
+	kh := testutil.WriteKnownHosts(t, dev, jump)
 	jt := target(t, jump, kh)
 	jt.Username, jt.Password = "jumper", "jpw"
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	out, err := runShowRun(t, ctx, target(t, dev, kh), &jt)
 	if err != nil {

@@ -1,4 +1,6 @@
 /thatchbox
+/dist/
+/coverage.out
 known_hosts
 *.key
 id_*

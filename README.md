@@ -4,9 +4,11 @@ A network device configuration backup collector, in the same family as RANCID an
 
 Personal addresses, hostnames, IDs and tokens are configuration and are never part of the code or tests.
 
-```sh
-go install github.com/whywaita/thatchbox/cmd/thatchbox@latest
-```
+## Install
+
+- Binaries for Linux and macOS (amd64, arm64) are attached to each [release](https://github.com/whywaita/thatchbox/releases), with `checksums.txt`.
+- Container image: `ghcr.io/whywaita/thatchbox:<version>` (for example `0.1.0`; also `<major>.<minor>` and `latest`). `main` and `sha-<commit>` track the main branch. Images are built for linux/amd64 and linux/arm64.
+- From source: `go install github.com/whywaita/thatchbox/cmd/thatchbox@latest`
 
 Design decisions, scope and deferred work are in [docs/design.md](docs/design.md).
 
@@ -146,17 +148,22 @@ A collection is committed only when all of these hold; otherwise the previous fi
 
 ## Container
 
-`Dockerfile` builds a static binary on `distroless/static:nonroot`. It runs without root and without capabilities (reachability is the TCP connection itself; no ICMP). It needs a writable temporary directory for the clone.
+`Dockerfile` builds a static binary on `distroless/static:nonroot`, cross-compiling for the target platform. It runs without root and without capabilities (reachability is the TCP connection itself; no ICMP). It needs a writable temporary directory for the clone.
 
 ## Tests
 
-All tests live in `tests/` and need no network or external services: SSH devices and jump hosts are simulated by an in-process SSH server, telnet devices by an in-process telnet server, and the git remote is a local bare repository.
+Each package carries its own tests (`internal/<package>/*_test.go`, as external `<package>_test` packages). They need no network or external services: SSH devices and jump hosts are simulated by an in-process SSH server, telnet devices by an in-process telnet server, and the git remote is a local bare repository. These fakes are shared through `internal/testutil`, which only tests import.
 
 ```sh
 make check     # gofmt, go vet, go test -race ./...
+make cover     # coverage of every package into coverage.out
 ```
 
 Go 1.26 or newer is required.
+
+## Releases
+
+Releases are cut with [tagpr](https://github.com/Songmu/tagpr). On every push to main, `.github/workflows/tagpr.yaml` keeps a release pull request open that updates `CHANGELOG.md` and proposes the next version (patch by default; label a merged pull request `minor` or `major` for a larger bump). Merging the release pull request tags `vX.Y.Z`, creates the GitHub release, attaches the archives from `make dist`, and publishes the multi-platform image to ghcr.io. CI (`.github/workflows/ci.yaml`) builds the image on pull requests and publishes `main` and `sha-<commit>` from the main branch.
 
 ## License
 

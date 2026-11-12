@@ -1,4 +1,4 @@
-package tests
+package inventory_test
 
 import (
 	"os"
@@ -8,61 +8,11 @@ import (
 	"time"
 
 	"github.com/whywaita/thatchbox/internal/inventory"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
-const validInventory = `
-defaults:
-  concurrency: 4
-  timeout: 90s
-  known_hosts: /etc/thatchbox/known_hosts
-credentials:
-  netadmin:
-    username: backup
-    password: {env: TB_TEST_PASSWORD}
-    enable_password: {file: /run/secrets/enable}
-  keyonly:
-    username: {env: TB_TEST_USER}
-    private_key: {file: /run/secrets/id_ed25519}
-jump_hosts:
-  bastion:
-    address: bastion.example.net
-    credential: keyonly
-devices:
-  - name: core-sw1
-    address: 192.0.2.1
-    driver: cisco_ios
-    credential: netadmin
-    ssh:
-      kex: ["+diffie-hellman-group1-sha1"]
-  - name: edge.r1
-    address: 192.0.2.2
-    port: 2222
-    driver: junos
-    credential: keyonly
-    jump: bastion
-    timeout: 5m
-  - name: old-ix
-    address: 192.0.2.3
-    driver: nec_ix
-    credential: netadmin
-    enabled: false
-`
-
-func writeInventory(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "inventory.yaml")
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func knownDrivers(name string) bool {
-	return name == "cisco_ios" || name == "junos" || name == "nec_ix"
-}
-
 func TestInventoryLoadAppliesDefaults(t *testing.T) {
-	inv, err := inventory.Load(writeInventory(t, validInventory), knownDrivers)
+	inv, err := inventory.Load(testutil.WriteInventory(t, testutil.ValidInventory), testutil.KnownDrivers)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -104,11 +54,11 @@ func TestInventoryRejectsInvalid(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			body := strings.Replace(validInventory, c.from, c.to, 1)
-			if body == validInventory {
+			body := strings.Replace(testutil.ValidInventory, c.from, c.to, 1)
+			if body == testutil.ValidInventory {
 				t.Fatalf("replacement %q not applied", c.from)
 			}
-			if _, err := inventory.Load(writeInventory(t, body), knownDrivers); err == nil {
+			if _, err := inventory.Load(testutil.WriteInventory(t, body), testutil.KnownDrivers); err == nil {
 				t.Fatal("expected error")
 			}
 		})
@@ -138,7 +88,7 @@ devices:
 `
 
 func TestInventoryTelnetDevice(t *testing.T) {
-	inv, err := inventory.Load(writeInventory(t, telnetInventory), knownDrivers)
+	inv, err := inventory.Load(testutil.WriteInventory(t, telnetInventory), testutil.KnownDrivers)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -149,7 +99,7 @@ func TestInventoryTelnetDevice(t *testing.T) {
 	if inv.Devices[1].Port != 2323 {
 		t.Errorf("port override lost: %+v", inv.Devices[1])
 	}
-	ssh, err := inventory.Load(writeInventory(t, validInventory), knownDrivers)
+	ssh, err := inventory.Load(testutil.WriteInventory(t, testutil.ValidInventory), testutil.KnownDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +117,7 @@ func TestInventoryRejectsInvalidTelnet(t *testing.T) {
 		"telnet without password":     {telnetInventory, "  line:\n    password: {env: TB_TEST_PASSWORD}\n", "  line:\n"},
 		"telnet through a jump host":  {telnetInventory, "transport: telnet\n  - name: other", "transport: telnet\n    jump: bastion\n  - name: other"},
 		"ssh device without username": {telnetInventory, "credential: ssh\n    transport: telnet", "credential: line"},
-		"jump host without username":  {validInventory, "username: {env: TB_TEST_USER}\n", ""},
+		"jump host without username":  {testutil.ValidInventory, "username: {env: TB_TEST_USER}\n", ""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -178,7 +128,7 @@ func TestInventoryRejectsInvalidTelnet(t *testing.T) {
 			if !strings.Contains(body, "jump_hosts") {
 				body += "jump_hosts:\n  bastion: {address: bastion.example.net, credential: ssh, known_hosts: /k}\n"
 			}
-			if _, err := inventory.Load(writeInventory(t, body), knownDrivers); err == nil {
+			if _, err := inventory.Load(testutil.WriteInventory(t, body), testutil.KnownDrivers); err == nil {
 				t.Fatal("expected error")
 			}
 		})

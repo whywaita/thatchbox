@@ -87,17 +87,16 @@ func Open(ctx context.Context, t Target, jump *Target) (io.ReadWriteCloser, erro
 		return nil, err
 	}
 	closers = append(closers, stream)
-	return &closeStream{ReadWriter: stream, close: closeAll}, nil
+	return &closeStream{ReadWriter: stream, close: sync.OnceFunc(closeAll)}, nil
 }
 
 type closeStream struct {
 	io.ReadWriter
-	once  sync.Once
 	close func()
 }
 
 func (c *closeStream) Close() error {
-	c.once.Do(c.close)
+	c.close()
 	return nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -267,16 +268,9 @@ type Status struct {
 
 // Equivalent reports whether a and b differ only in timestamps.
 func (a Status) Equivalent(b Status) bool {
-	if len(a.Devices) != len(b.Devices) {
-		return false
-	}
-	for name, x := range a.Devices {
-		y, ok := b.Devices[name]
-		if !ok || x.Driver != y.Driver || x.State != y.State || x.Reason != y.Reason {
-			return false
-		}
-	}
-	return true
+	return maps.EqualFunc(a.Devices, b.Devices, func(x, y DeviceStatus) bool {
+		return x.Driver == y.Driver && x.State == y.State && x.Reason == y.Reason
+	})
 }
 
 // ReadStatus returns status.json, or an empty status when absent.

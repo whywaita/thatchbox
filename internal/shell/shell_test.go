@@ -1,4 +1,4 @@
-package tests
+package shell_test
 
 import (
 	"context"
@@ -9,20 +9,19 @@ import (
 	"time"
 
 	"github.com/whywaita/thatchbox/internal/shell"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
-const shortTimeout = 2 * time.Second
-
 func TestShellRunsCommandAfterEnableAndSetup(t *testing.T) {
-	dev := &fakeDevice{
-		hostname:       "sw1",
-		banner:         "Authorized access only",
-		enablePassword: "enpw",
-		commands:       map[string]string{"show running-config": ciscoRunning},
+	dev := &testutil.FakeDevice{
+		Hostname:       "sw1",
+		Banner:         "Authorized access only",
+		EnablePassword: "enpw",
+		Commands:       map[string]string{"show running-config": testutil.CiscoRunning},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	s, err := shell.Open(ctx, dev.connect(), ciscoDriver(t), "enpw")
+	s, err := shell.Open(ctx, dev.Connect(), testutil.CiscoDriver(t), "enpw")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -44,21 +43,21 @@ func TestShellRunsCommandAfterEnableAndSetup(t *testing.T) {
 
 func TestShellAnswersPager(t *testing.T) {
 	long := strings.Repeat("interface x\n description y\n", 20) + "end\n"
-	dev := &fakeDevice{
-		hostname:  "sw1",
-		pageEvery: 7,
-		commands:  map[string]string{"show running-config": long},
+	dev := &testutil.FakeDevice{
+		Hostname:  "sw1",
+		PageEvery: 7,
+		Commands:  map[string]string{"show running-config": long},
 	}
 	// A driver without setup so the pager is never disabled.
-	d := mustParse(t, `
+	d := testutil.ParseDriver(t, `
 name: paged
 prompt: '^[\w.\-]+[>#]\s*$'
 pager: {pattern: '\s*--More--\s*$', send: ' '}
 outputs: [{path: cfg, command: show running-config, end: '^end$'}]
 `)
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	s, err := shell.Open(ctx, dev.connect(), d, "")
+	s, err := shell.Open(ctx, dev.Connect(), d, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -77,24 +76,24 @@ outputs: [{path: cfg, command: show running-config, end: '^end$'}]
 }
 
 func TestShellWrongEnablePassword(t *testing.T) {
-	dev := &fakeDevice{hostname: "sw1", enablePassword: "right"}
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	dev := &testutil.FakeDevice{Hostname: "sw1", EnablePassword: "right"}
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	_, err := shell.Open(ctx, dev.connect(), ciscoDriver(t), "wrong")
+	_, err := shell.Open(ctx, dev.Connect(), testutil.CiscoDriver(t), "wrong")
 	if !errors.Is(err, shell.ErrEnable) {
 		t.Fatalf("want ErrEnable, got %v", err)
 	}
 }
 
 func TestShellTimesOutWithoutLeakingOutput(t *testing.T) {
-	dev := &fakeDevice{
-		hostname: "sw1",
-		stallOn:  "show running-config",
-		commands: map[string]string{"show running-config": "secret-token-in-output\n"},
+	dev := &testutil.FakeDevice{
+		Hostname: "sw1",
+		StallOn:  "show running-config",
+		Commands: map[string]string{"show running-config": "secret-token-in-output\n"},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	s, err := shell.Open(ctx, dev.connect(), ciscoDriver(t), "")
+	s, err := shell.Open(ctx, dev.Connect(), testutil.CiscoDriver(t), "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -111,14 +110,14 @@ func TestShellTimesOutWithoutLeakingOutput(t *testing.T) {
 }
 
 func TestShellConnectionClosedMidOutput(t *testing.T) {
-	dev := &fakeDevice{
-		hostname: "sw1",
-		dropOn:   "show running-config",
-		commands: map[string]string{"show running-config": ciscoRunning},
+	dev := &testutil.FakeDevice{
+		Hostname: "sw1",
+		DropOn:   "show running-config",
+		Commands: map[string]string{"show running-config": testutil.CiscoRunning},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	s, err := shell.Open(ctx, dev.connect(), ciscoDriver(t), "")
+	s, err := shell.Open(ctx, dev.Connect(), testutil.CiscoDriver(t), "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -133,20 +132,20 @@ func TestShellConnectionClosedMidOutput(t *testing.T) {
 // disabled, and each pager prompt is erased with "\b \b" pairs.
 func TestShellNECIXEnableConfig(t *testing.T) {
 	cfg := "! NEC Portable Internetwork Core Operating System Software\n!\nhostname example-ix\n  ip address 192.0.2.1/24\n  no shutdown\n!\ninterface GigaEthernet1.0\n  no ip address\n  no shutdown\n"
-	dev := &fakeDevice{
-		hostname:      "ix",
-		userSuffix:    "# ",
-		privSuffix:    "(config)# ",
-		enableCommand: "enable-config",
-		privCommands:  true,
-		pageEvery:     2,
-		pagerErase:    strings.Repeat("\b \b", 8),
-		commands:      map[string]string{"show running-config": cfg},
+	dev := &testutil.FakeDevice{
+		Hostname:      "ix",
+		UserSuffix:    "# ",
+		PrivSuffix:    "(config)# ",
+		EnableCommand: "enable-config",
+		PrivCommands:  true,
+		PageEvery:     2,
+		PagerErase:    strings.Repeat("\b \b", 8),
+		Commands:      map[string]string{"show running-config": cfg},
 	}
-	d, _ := mustRegistry(t).Get("nec_ix")
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	d, _ := testutil.Registry(t).Get("nec_ix")
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	s, err := shell.Open(ctx, dev.connect(), d, "")
+	s, err := shell.Open(ctx, dev.Connect(), d, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -169,20 +168,20 @@ func TestShellNECIXEnableConfig(t *testing.T) {
 
 func TestShellJunosPrompt(t *testing.T) {
 	cfg := "version 21.4R3;\nsystem {\n    host-name r1;\n}\n\n{master:0}\n"
-	dev := &fakeDevice{
-		hostname:   "admin@r1",
-		privSuffix: "> ",
-		commands: map[string]string{
+	dev := &testutil.FakeDevice{
+		Hostname:   "admin@r1",
+		PrivSuffix: "> ",
+		Commands: map[string]string{
 			"show configuration | no-more": cfg,
 			"set cli screen-length 0":      "Screen length set to 0\n",
 			"set cli screen-width 0":       "Screen width set to 0\n",
 		},
 	}
-	reg := mustRegistry(t)
+	reg := testutil.Registry(t)
 	d, _ := reg.Get("junos")
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	s, err := shell.Open(ctx, dev.connect(), d, "")
+	s, err := shell.Open(ctx, dev.Connect(), d, "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

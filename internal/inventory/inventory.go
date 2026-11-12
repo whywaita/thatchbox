@@ -3,6 +3,7 @@ package inventory
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -194,26 +195,26 @@ func Load(path string, knownDriver func(string) bool) (*Inventory, error) {
 
 func (inv *Inventory) applyDefaults() {
 	d := &inv.Defaults
-	d.Concurrency = orDefault(d.Concurrency, DefaultConcurrency)
-	d.Port = orDefault(d.Port, DefaultPort)
-	d.Timeout = orDefault(d.Timeout, Duration(DefaultTimeout))
-	d.MinSizeRatio = orDefault(d.MinSizeRatio, DefaultMinSizeRatio)
+	d.Concurrency = cmp.Or(d.Concurrency, DefaultConcurrency)
+	d.Port = cmp.Or(d.Port, DefaultPort)
+	d.Timeout = cmp.Or(d.Timeout, Duration(DefaultTimeout))
+	d.MinSizeRatio = cmp.Or(d.MinSizeRatio, DefaultMinSizeRatio)
 	for name, j := range inv.JumpHosts {
-		j.Port = orDefault(j.Port, d.Port)
-		j.KnownHosts = orDefault(j.KnownHosts, d.KnownHosts)
+		j.Port = cmp.Or(j.Port, d.Port)
+		j.KnownHosts = cmp.Or(j.KnownHosts, d.KnownHosts)
 		j.SSH = j.SSH.over(d.SSH)
 		inv.JumpHosts[name] = j
 	}
 	for i := range inv.Devices {
 		dev := &inv.Devices[i]
-		dev.Transport = orDefault(dev.Transport, TransportSSH)
+		dev.Transport = cmp.Or(dev.Transport, TransportSSH)
 		port := d.Port
 		if dev.Transport == TransportTelnet {
 			port = DefaultTelnetPort
 		}
-		dev.Port = orDefault(dev.Port, port)
-		dev.Timeout = orDefault(dev.Timeout, d.Timeout)
-		dev.KnownHosts = orDefault(dev.KnownHosts, d.KnownHosts)
+		dev.Port = cmp.Or(dev.Port, port)
+		dev.Timeout = cmp.Or(dev.Timeout, d.Timeout)
+		dev.KnownHosts = cmp.Or(dev.KnownHosts, d.KnownHosts)
 		if dev.MinSizeRatio == nil {
 			dev.MinSizeRatio = &d.MinSizeRatio
 		}
@@ -228,14 +229,6 @@ func (s SSH) over(base SSH) SSH {
 		MACs:              orDefaultSlice(s.MACs, base.MACs),
 		HostKeyAlgorithms: orDefaultSlice(s.HostKeyAlgorithms, base.HostKeyAlgorithms),
 	}
-}
-
-func orDefault[T comparable](v, def T) T {
-	var zero T
-	if v == zero {
-		return def
-	}
-	return v
 }
 
 func orDefaultSlice(v, def []string) []string {
