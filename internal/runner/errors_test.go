@@ -1,4 +1,4 @@
-package tests
+package runner_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/whywaita/thatchbox/internal/shell"
 	"github.com/whywaita/thatchbox/internal/sshdial"
 	"github.com/whywaita/thatchbox/internal/telnet"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 func TestReason(t *testing.T) {
@@ -50,7 +51,7 @@ func TestReason(t *testing.T) {
 
 // A collector that ignores its deadline still fails the device.
 func TestRunnerEnforcesDeviceTimeout(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	devs := devices("slow")
 	devs[0].Timeout = inventory.Duration(20 * time.Millisecond)
 	c := collectorFunc(func(ctx context.Context, _ inventory.Device) (map[string][]byte, error) {
@@ -64,14 +65,14 @@ func TestRunnerEnforcesDeviceTimeout(t *testing.T) {
 	if len(res.Failed) != 1 {
 		t.Fatalf("slow device not failed: %+v", res)
 	}
-	st, _ := openStore(t, remote).ReadStatus()
+	st, _ := testutil.OpenStore(t, remote).ReadStatus()
 	if st.Devices["slow"].Reason != "timeout" {
 		t.Fatalf("status = %+v", st.Devices["slow"])
 	}
 }
 
 func TestRunnerEmptyFilesFail(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {}}}
 	res, err := newRunner(t, remote, c, devices("sw1")).Run(context.Background())
 	if err != nil {
@@ -83,7 +84,7 @@ func TestRunnerEmptyFilesFail(t *testing.T) {
 }
 
 func TestRunnerZeroConcurrencyStillRuns(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{
 		"sw1": {"running-config": bigConfig(1)},
 		"sw2": {"running-config": bigConfig(1)},
@@ -102,12 +103,12 @@ func TestRunnerZeroConcurrencyStillRuns(t *testing.T) {
 // Without any change a failure-only run commits "Update collection status"
 // and lists the failed devices.
 func TestRunnerCommitMessageForFailuresOnly(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{errs: map[string]error{"sw1": sshdial.ErrAuth}}
 	if _, err := newRunner(t, remote, c, devices("sw1")).Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	msg := remoteCommits(t, remote)[0].Message
+	msg := testutil.RemoteCommits(t, remote)[0].Message
 	if !strings.HasPrefix(msg, "Update collection status") || !strings.Contains(msg, "Failed: sw1") {
 		t.Fatalf("commit message %q", msg)
 	}
@@ -115,14 +116,14 @@ func TestRunnerCommitMessageForFailuresOnly(t *testing.T) {
 
 func TestRunnerCorruptStatusIsError(t *testing.T) {
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {"running-config": bigConfig(1)}}}
-	if _, err := newRunner(t, remoteWithStatus(t, "{"), c, devices("sw1")).Run(context.Background()); err == nil {
+	if _, err := newRunner(t, testutil.RemoteWithStatus(t, "{"), c, devices("sw1")).Run(context.Background()); err == nil {
 		t.Fatal("corrupt status.json accepted")
 	}
 }
 
 // A file set that grows by a file and loses another counts as a change.
 func TestRunnerReplacesFileSet(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.NewRemote(t)
 	c := &fakeCollector{files: map[string]map[string][]byte{"sw1": {"a": bigConfig(5), "b": bigConfig(5)}}}
 	if _, err := newRunner(t, remote, c, devices("sw1")).Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -132,7 +133,7 @@ func TestRunnerReplacesFileSet(t *testing.T) {
 	if err != nil || len(res.Changed) != 1 {
 		t.Fatalf("Run: %+v %v", res, err)
 	}
-	files, _ := openStore(t, remote).ReadDevice("sw1")
+	files, _ := testutil.OpenStore(t, remote).ReadDevice("sw1")
 	if _, ok := files["b"]; ok || len(files) != 2 {
 		t.Fatalf("files = %v", files)
 	}

@@ -1,4 +1,4 @@
-package tests
+package collect_test
 
 import (
 	"context"
@@ -13,11 +13,12 @@ import (
 	"github.com/whywaita/thatchbox/internal/runner"
 	"github.com/whywaita/thatchbox/internal/shell"
 	"github.com/whywaita/thatchbox/internal/sshdial"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 func collectOne(t *testing.T, inv *inventory.Inventory, reg *driver.Registry, dev inventory.Device) (map[string][]byte, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	return (&collect.Collector{Inventory: inv, Drivers: reg}).Collect(ctx, dev)
 }
@@ -30,7 +31,7 @@ func closedPort(t *testing.T) (string, int) {
 	}
 	addr := ln.Addr().String()
 	ln.Close()
-	return hostPort(t, addr)
+	return testutil.HostPort(t, addr)
 }
 
 func passwordInventory(env string) *inventory.Inventory {
@@ -44,11 +45,11 @@ func passwordInventory(env string) *inventory.Inventory {
 
 func TestCollectOverSSH(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "pw")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	h, p := hostPort(t, srv.addr)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	h, p := testutil.HostPort(t, srv.Addr)
 	dev := inventory.Device{Name: "sw1", Address: h, Port: p, Driver: "cisco_ios", Credential: "c",
-		Transport: inventory.TransportSSH, KnownHosts: writeKnownHosts(t, srv)}
-	files, err := collectOne(t, passwordInventory("TB_COLLECT_PW"), mustRegistry(t), dev)
+		Transport: inventory.TransportSSH, KnownHosts: testutil.WriteKnownHosts(t, srv)}
+	files, err := collectOne(t, passwordInventory("TB_COLLECT_PW"), testutil.Registry(t), dev)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -60,10 +61,10 @@ func TestCollectOverSSH(t *testing.T) {
 
 func TestCollectErrors(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "pw")
-	reg := mustRegistry(t)
+	reg := testutil.Registry(t)
 	h, p := closedPort(t)
 	ssh := inventory.Device{Name: "sw1", Address: h, Port: p, Driver: "cisco_ios", Credential: "c",
-		Transport: inventory.TransportSSH, KnownHosts: writeFile(t, "kh", nil)}
+		Transport: inventory.TransportSSH, KnownHosts: testutil.WriteFile(t, "kh", nil)}
 	telnetDev := ssh
 	telnetDev.Transport = inventory.TransportTelnet
 
@@ -94,10 +95,10 @@ func TestCollectJumpHostCredentialError(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "pw")
 	inv := passwordInventory("TB_COLLECT_PW")
 	inv.Credentials["jc"] = inventory.Credential{Username: inventory.Secret{Literal: "j"}, Password: inventory.Secret{Env: "TB_COLLECT_UNSET"}}
-	inv.JumpHosts["bastion"] = inventory.JumpHost{Address: "127.0.0.1", Port: 1, Credential: "jc", KnownHosts: writeFile(t, "kh", nil)}
+	inv.JumpHosts["bastion"] = inventory.JumpHost{Address: "127.0.0.1", Port: 1, Credential: "jc", KnownHosts: testutil.WriteFile(t, "kh", nil)}
 	dev := inventory.Device{Name: "sw1", Address: "127.0.0.1", Port: 1, Driver: "cisco_ios", Credential: "c",
-		Transport: inventory.TransportSSH, KnownHosts: writeFile(t, "kh", nil), Jump: "bastion"}
-	_, err := collectOne(t, inv, mustRegistry(t), dev)
+		Transport: inventory.TransportSSH, KnownHosts: testutil.WriteFile(t, "kh", nil), Jump: "bastion"}
+	_, err := collectOne(t, inv, testutil.Registry(t), dev)
 	if !errors.Is(err, inventory.ErrCredential) || !strings.Contains(err.Error(), "bastion") {
 		t.Fatalf("want jump host credential error, got %v", err)
 	}
@@ -107,10 +108,10 @@ func TestCollectJumpHostUnreachable(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "pw")
 	inv := passwordInventory("TB_COLLECT_PW")
 	h, p := closedPort(t)
-	inv.JumpHosts["bastion"] = inventory.JumpHost{Address: h, Port: p, Credential: "c", KnownHosts: writeFile(t, "kh", nil)}
+	inv.JumpHosts["bastion"] = inventory.JumpHost{Address: h, Port: p, Credential: "c", KnownHosts: testutil.WriteFile(t, "kh", nil)}
 	dev := inventory.Device{Name: "sw1", Address: "192.0.2.1", Port: 22, Driver: "cisco_ios", Credential: "c",
-		Transport: inventory.TransportSSH, KnownHosts: writeFile(t, "kh", nil), Jump: "bastion"}
-	_, err := collectOne(t, inv, mustRegistry(t), dev)
+		Transport: inventory.TransportSSH, KnownHosts: testutil.WriteFile(t, "kh", nil), Jump: "bastion"}
+	_, err := collectOne(t, inv, testutil.Registry(t), dev)
 	if !errors.Is(err, sshdial.ErrConnect) {
 		t.Fatalf("want ErrConnect, got %v", err)
 	}
@@ -118,11 +119,11 @@ func TestCollectJumpHostUnreachable(t *testing.T) {
 
 func TestCollectTelnetLoginRejected(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "wrong")
-	srv := startTelnetServer(t, telnetServerOptions{password: "right", device: simpleDevice()})
-	h, p := hostPort(t, srv.addr)
+	srv := testutil.StartTelnetServer(t, testutil.TelnetServerOptions{Password: "right", Device: testutil.SimpleDevice()})
+	h, p := testutil.HostPort(t, srv.Addr)
 	inv := &inventory.Inventory{Credentials: map[string]inventory.Credential{"c": {Password: inventory.Secret{Env: "TB_COLLECT_PW"}}}}
 	dev := inventory.Device{Name: "sw1", Address: h, Port: p, Driver: "cisco_ios", Credential: "c", Transport: inventory.TransportTelnet}
-	_, err := collectOne(t, inv, mustRegistry(t), dev)
+	_, err := collectOne(t, inv, testutil.Registry(t), dev)
 	if !errors.Is(err, shell.ErrLogin) {
 		t.Fatalf("want ErrLogin, got %v", err)
 	}
@@ -131,13 +132,13 @@ func TestCollectTelnetLoginRejected(t *testing.T) {
 // A device that hangs up mid-output fails the whole device, naming the file.
 func TestCollectCommandFailure(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "pw")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: &fakeDevice{
-		hostname: "sw1", dropOn: "show running-config", commands: map[string]string{"show running-config": ciscoRunning},
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: &testutil.FakeDevice{
+		Hostname: "sw1", DropOn: "show running-config", Commands: map[string]string{"show running-config": testutil.CiscoRunning},
 	}})
-	h, p := hostPort(t, srv.addr)
+	h, p := testutil.HostPort(t, srv.Addr)
 	dev := inventory.Device{Name: "sw1", Address: h, Port: p, Driver: "cisco_ios", Credential: "c",
-		Transport: inventory.TransportSSH, KnownHosts: writeKnownHosts(t, srv)}
-	_, err := collectOne(t, passwordInventory("TB_COLLECT_PW"), mustRegistry(t), dev)
+		Transport: inventory.TransportSSH, KnownHosts: testutil.WriteKnownHosts(t, srv)}
+	_, err := collectOne(t, passwordInventory("TB_COLLECT_PW"), testutil.Registry(t), dev)
 	if !errors.Is(err, shell.ErrClosed) || !strings.HasPrefix(err.Error(), "running-config:") {
 		t.Fatalf("want running-config: ErrClosed, got %v", err)
 	}
@@ -147,13 +148,13 @@ func TestCollectCommandFailure(t *testing.T) {
 // by category without the output.
 func TestCollectProcessFailure(t *testing.T) {
 	t.Setenv("TB_COLLECT_PW", "pw")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: &fakeDevice{
-		hostname: "sw1", commands: map[string]string{},
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: &testutil.FakeDevice{
+		Hostname: "sw1", Commands: map[string]string{},
 	}})
-	h, p := hostPort(t, srv.addr)
+	h, p := testutil.HostPort(t, srv.Addr)
 	dev := inventory.Device{Name: "sw1", Address: h, Port: p, Driver: "cisco_ios", Credential: "c",
-		Transport: inventory.TransportSSH, KnownHosts: writeKnownHosts(t, srv)}
-	_, err := collectOne(t, passwordInventory("TB_COLLECT_PW"), mustRegistry(t), dev)
+		Transport: inventory.TransportSSH, KnownHosts: testutil.WriteKnownHosts(t, srv)}
+	_, err := collectOne(t, passwordInventory("TB_COLLECT_PW"), testutil.Registry(t), dev)
 	if !errors.Is(err, driver.ErrDeviceError) || strings.Contains(err.Error(), "Invalid input") {
 		t.Fatalf("want ErrDeviceError without output, got %v", err)
 	}

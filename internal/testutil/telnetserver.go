@@ -1,4 +1,4 @@
-package tests
+package testutil
 
 import (
 	"bufio"
@@ -10,45 +10,45 @@ import (
 
 // Telnet protocol bytes (RFC 854).
 const (
-	tnIAC  = 255
-	tnDONT = 254
-	tnDO   = 253
-	tnWONT = 252
-	tnWILL = 251
-	tnSB   = 250
-	tnSE   = 240
+	IAC  = 255
+	DONT = 254
+	DO   = 253
+	WONT = 252
+	WILL = 251
+	SB   = 250
+	SE   = 240
 
-	tnOptEcho  = 1
-	tnOptSGA   = 3
-	tnOptTType = 24
-	tnOptNAWS  = 31
+	OptEcho  = 1
+	OptSGA   = 3
+	OptTType = 24
+	OptNAWS  = 31
 )
 
-// telnetServer is an in-process telnet server in front of a fakeDevice. It
+// TelnetServer is an in-process telnet server in front of a FakeDevice. It
 // negotiates options, asks for a login like Cisco IOS does, and records the
 // option replies the client sends.
-type telnetServer struct {
-	addr string
-	opts telnetServerOptions
+type TelnetServer struct {
+	Addr string
+	opts TelnetServerOptions
 
 	mu      sync.Mutex
 	replies [][3]byte
 }
 
-type telnetServerOptions struct {
-	username string // empty: line password only ("Password:" without "Username:")
-	password string
-	device   *fakeDevice
+type TelnetServerOptions struct {
+	Username string // empty: line password only ("Password:" without "Username:")
+	Password string
+	Device   *FakeDevice
 }
 
-func startTelnetServer(t *testing.T, o telnetServerOptions) *telnetServer {
+func StartTelnetServer(t *testing.T, o TelnetServerOptions) *TelnetServer {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
-	s := &telnetServer{addr: ln.Addr().String(), opts: o}
+	s := &TelnetServer{Addr: ln.Addr().String(), opts: o}
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -62,20 +62,20 @@ func startTelnetServer(t *testing.T, o telnetServerOptions) *telnetServer {
 }
 
 // Replies returns the option negotiation commands received from the client.
-func (s *telnetServer) Replies() [][3]byte {
+func (s *TelnetServer) Replies() [][3]byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([][3]byte(nil), s.replies...)
 }
 
-func (s *telnetServer) handle(c net.Conn) {
+func (s *TelnetServer) handle(c net.Conn) {
 	defer c.Close()
 	// Negotiation split across writes, with a subnegotiation in between, to
 	// exercise the client's state across reads.
 	for _, chunk := range [][]byte{
-		{tnIAC, tnWILL, tnOptEcho, tnIAC},
-		{tnWILL, tnOptSGA, tnIAC, tnDO, tnOptTType},
-		{tnIAC, tnDO, tnOptNAWS, tnIAC, tnSB, tnOptTType, 1, tnIAC, tnSE},
+		{IAC, WILL, OptEcho, IAC},
+		{WILL, OptSGA, IAC, DO, OptTType},
+		{IAC, DO, OptNAWS, IAC, SB, OptTType, 1, IAC, SE},
 	} {
 		if _, err := c.Write(chunk); err != nil {
 			return
@@ -86,10 +86,10 @@ func (s *telnetServer) handle(c net.Conn) {
 		return
 	}
 	// The device reads the rest of the stream, including bytes r buffered.
-	s.opts.device.serve(&pipeConn{Reader: r, Writer: c, closers: []io.Closer{c}})
+	s.opts.Device.serve(&pipeConn{Reader: r, Writer: c, closers: []io.Closer{c}})
 }
 
-func (s *telnetServer) login(w io.Writer, r *bufio.Reader) bool {
+func (s *TelnetServer) login(w io.Writer, r *bufio.Reader) bool {
 	write := func(str string) bool {
 		_, err := io.WriteString(w, str)
 		return err == nil
@@ -99,7 +99,7 @@ func (s *telnetServer) login(w io.Writer, r *bufio.Reader) bool {
 	}
 	for range 3 {
 		user := ""
-		if s.opts.username != "" {
+		if s.opts.Username != "" {
 			if !write("Username: ") {
 				return false
 			}
@@ -119,7 +119,7 @@ func (s *telnetServer) login(w io.Writer, r *bufio.Reader) bool {
 		if err != nil {
 			return false
 		}
-		if user == s.opts.username && pw == s.opts.password {
+		if user == s.opts.Username && pw == s.opts.Password {
 			return write("\r\n")
 		}
 		if !write("\r\n% Login invalid\r\n\r\n") {
@@ -130,7 +130,7 @@ func (s *telnetServer) login(w io.Writer, r *bufio.Reader) bool {
 	return false
 }
 
-func (s *telnetServer) record(cmd [3]byte) {
+func (s *TelnetServer) record(cmd [3]byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.replies = append(s.replies, cmd)
@@ -152,7 +152,7 @@ func (t *telnetInput) Read(p []byte) (int, error) {
 		if err != nil {
 			return n, err
 		}
-		if b != tnIAC {
+		if b != IAC {
 			p[n] = b
 			n++
 			continue
@@ -161,8 +161,8 @@ func (t *telnetInput) Read(p []byte) (int, error) {
 		if err != nil {
 			return n, err
 		}
-		if cmd == tnIAC {
-			p[n] = tnIAC
+		if cmd == IAC {
+			p[n] = IAC
 			n++
 			continue
 		}
@@ -170,7 +170,7 @@ func (t *telnetInput) Read(p []byte) (int, error) {
 		if err != nil {
 			return n, err
 		}
-		t.record([3]byte{tnIAC, cmd, opt})
+		t.record([3]byte{IAC, cmd, opt})
 	}
 	return n, nil
 }

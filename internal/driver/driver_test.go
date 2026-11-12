@@ -1,4 +1,4 @@
-package tests
+package driver_test
 
 import (
 	"os"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/whywaita/thatchbox/internal/driver"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 func TestBuiltinDriversLoad(t *testing.T) {
@@ -93,55 +94,9 @@ outputs: [{path: a, command: x}, {path: a, command: y}]
 	}
 }
 
-func mustRegistry(t *testing.T) *driver.Registry {
-	t.Helper()
-	reg, err := driver.Load("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reg
-}
-
-func mustParse(t *testing.T, def string) *driver.Driver {
-	t.Helper()
-	d, err := driver.Parse([]byte(def))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return d
-}
-
-func ciscoDriver(t *testing.T) *driver.Driver {
-	t.Helper()
-	d, _ := mustRegistry(t).Get("cisco_ios")
-	return d
-}
-
-const ciscoRunning = `Building configuration...
-
-Current configuration : 1234 bytes
-!
-! Last configuration change at 12:00:00 JST Mon Nov 9 2026 by admin
-! NVRAM config last updated at 12:00:01 JST Mon Nov 9 2026 by admin
-!
-version 15.2
-hostname example-sw
-!
-enable secret 9 $9$abcdefghijklmnop$qrstuvwxyz0123456789
-username admin privilege 15 secret 9 $9$zzzzzzzzzzzz$yyyyyyyyyyyy
-!
-ntp clock-period 36028797
-snmp-server community s3cr3t-comm RO
-crypto isakmp key psk-value address 0.0.0.0
-line vty 0 4
- password 7 0822455D0A16
-!
-end
-`
-
 func TestCiscoProcessNormalizesAndMasks(t *testing.T) {
-	d := ciscoDriver(t)
-	out, err := d.Process(d.Outputs[0], ciscoRunning)
+	d := testutil.CiscoDriver(t)
+	out, err := d.Process(d.Outputs[0], testutil.CiscoRunning)
 	if err != nil {
 		t.Fatalf("Process: %v", err)
 	}
@@ -162,12 +117,12 @@ func TestCiscoProcessNormalizesAndMasks(t *testing.T) {
 }
 
 func TestProcessIsStableAcrossVolatileChanges(t *testing.T) {
-	d := ciscoDriver(t)
-	a, err := d.Process(d.Outputs[0], ciscoRunning)
+	d := testutil.CiscoDriver(t)
+	a, err := d.Process(d.Outputs[0], testutil.CiscoRunning)
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := strings.NewReplacer("12:00:00", "13:14:15", "36028797", "36028800", "1234 bytes", "1240 bytes").Replace(ciscoRunning)
+	changed := strings.NewReplacer("12:00:00", "13:14:15", "36028797", "36028800", "1234 bytes", "1240 bytes").Replace(testutil.CiscoRunning)
 	b, err := d.Process(d.Outputs[0], changed)
 	if err != nil {
 		t.Fatal(err)
@@ -178,22 +133,22 @@ func TestProcessIsStableAcrossVolatileChanges(t *testing.T) {
 }
 
 func TestProcessRejectsMissingEndMarker(t *testing.T) {
-	d := ciscoDriver(t)
-	truncated := ciscoRunning[:strings.Index(ciscoRunning, "line vty")]
+	d := testutil.CiscoDriver(t)
+	truncated := testutil.CiscoRunning[:strings.Index(testutil.CiscoRunning, "line vty")]
 	if _, err := d.Process(d.Outputs[0], truncated); err == nil {
 		t.Fatal("expected incomplete output error")
 	}
 }
 
 func TestProcessRejectsDeviceErrorOutput(t *testing.T) {
-	d := ciscoDriver(t)
+	d := testutil.CiscoDriver(t)
 	if _, err := d.Process(d.Outputs[0], "% Invalid input detected at '^' marker.\n"); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestProcessErrorDoesNotEchoDeviceOutput(t *testing.T) {
-	d := ciscoDriver(t)
+	d := testutil.CiscoDriver(t)
 	_, err := d.Process(d.Outputs[0], "secret-token-in-output\n% Invalid input\n")
 	if err == nil || strings.Contains(err.Error(), "secret-token-in-output") {
 		t.Fatalf("error must not contain device output: %v", err)

@@ -1,4 +1,4 @@
-package tests
+package driver_test
 
 import (
 	"errors"
@@ -9,10 +9,11 @@ import (
 	"testing"
 
 	"github.com/whywaita/thatchbox/internal/driver"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 func TestRegistryNamesSorted(t *testing.T) {
-	got := mustRegistry(t).Names()
+	got := testutil.Registry(t).Names()
 	if want := []string{"cisco_ios", "junos", "nec_ix"}; !slices.Equal(got, want) {
 		t.Fatalf("Names = %q, want %q", got, want)
 	}
@@ -126,7 +127,7 @@ outputs:
 `
 
 func TestProcessAppliesDriverAndOutputRules(t *testing.T) {
-	d := mustParse(t, customDriver)
+	d := testutil.ParseDriver(t, customDriver)
 	raw := "\r\n\r\n! volatile line\r\nuptime 12345\r\nversion v2.17   \r\nntp clock-period 1\r\n" +
 		"key k1 key k2\r\nsnmp community c1\r\ncertificate self\r\n AABB\r\n CCDD\r\n quit\r\nend\r\n\r\n"
 	got, err := d.Process(d.Outputs[0], raw)
@@ -157,7 +158,7 @@ func TestProcessAppliesDriverAndOutputRules(t *testing.T) {
 }
 
 func TestProcessUnterminatedMaskBlockMasksToEnd(t *testing.T) {
-	d := mustParse(t, customDriver)
+	d := testutil.ParseDriver(t, customDriver)
 	got, err := d.Process(d.Outputs[1], "certificate self\n AABB\n CCDD\n")
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +169,7 @@ func TestProcessUnterminatedMaskBlockMasksToEnd(t *testing.T) {
 }
 
 func TestProcessEmptyAfterDrop(t *testing.T) {
-	d := mustParse(t, customDriver)
+	d := testutil.ParseDriver(t, customDriver)
 	for _, raw := range []string{"", "\r\n\r\n", "! volatile\n\n"} {
 		if _, err := d.Process(d.Outputs[1], raw); !errors.Is(err, driver.ErrEmpty) {
 			t.Errorf("Process(%q) = %v, want ErrEmpty", raw, err)
@@ -177,7 +178,7 @@ func TestProcessEmptyAfterDrop(t *testing.T) {
 }
 
 func TestProcessDeviceErrorWinsOverDrop(t *testing.T) {
-	d := mustParse(t, customDriver)
+	d := testutil.ParseDriver(t, customDriver)
 	if _, err := d.Process(d.Outputs[1], "% Invalid input\n"); !errors.Is(err, driver.ErrDeviceError) {
 		t.Fatalf("want ErrDeviceError, got %v", err)
 	}

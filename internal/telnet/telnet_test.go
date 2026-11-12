@@ -1,4 +1,4 @@
-package tests
+package telnet_test
 
 import (
 	"bytes"
@@ -19,18 +19,19 @@ import (
 	"github.com/whywaita/thatchbox/internal/runner"
 	"github.com/whywaita/thatchbox/internal/shell"
 	"github.com/whywaita/thatchbox/internal/telnet"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
-func telnetShowRun(t *testing.T, srv *telnetServer, login shell.Login, enable string) (string, error) {
+func telnetShowRun(t *testing.T, srv *testutil.TelnetServer, login shell.Login, enable string) (string, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
-	h, p := hostPort(t, srv.addr)
+	h, p := testutil.HostPort(t, srv.Addr)
 	conn, err := telnet.Dial(ctx, h, p)
 	if err != nil {
 		return "", err
 	}
-	s, err := shell.OpenLogin(ctx, conn, ciscoDriver(t), login, enable)
+	s, err := shell.OpenLogin(ctx, conn, testutil.CiscoDriver(t), login, enable)
 	if err != nil {
 		conn.Close()
 		return "", err
@@ -41,8 +42,8 @@ func telnetShowRun(t *testing.T, srv *telnetServer, login shell.Login, enable st
 
 // Seen on a Catalyst 3560: a line password without a username, then enable.
 func TestTelnetLinePasswordAndEnable(t *testing.T) {
-	dev := &fakeDevice{hostname: "sw1", enablePassword: "en-pw", commands: map[string]string{"show running-config": ciscoRunning}}
-	srv := startTelnetServer(t, telnetServerOptions{password: "line-pw", device: dev})
+	dev := &testutil.FakeDevice{Hostname: "sw1", EnablePassword: "en-pw", Commands: map[string]string{"show running-config": testutil.CiscoRunning}}
+	srv := testutil.StartTelnetServer(t, testutil.TelnetServerOptions{Password: "line-pw", Device: dev})
 	out, err := telnetShowRun(t, srv, shell.Login{Password: "line-pw"}, "en-pw")
 	if err != nil {
 		t.Fatalf("collect: %v", err)
@@ -55,10 +56,10 @@ func TestTelnetLinePasswordAndEnable(t *testing.T) {
 	}
 	// Server echo and suppress-go-ahead are accepted; everything else is refused.
 	want := [][3]byte{
-		{tnIAC, tnDO, tnOptEcho},
-		{tnIAC, tnDO, tnOptSGA},
-		{tnIAC, tnWONT, tnOptTType},
-		{tnIAC, tnWONT, tnOptNAWS},
+		{testutil.IAC, testutil.DO, testutil.OptEcho},
+		{testutil.IAC, testutil.DO, testutil.OptSGA},
+		{testutil.IAC, testutil.WONT, testutil.OptTType},
+		{testutil.IAC, testutil.WONT, testutil.OptNAWS},
 	}
 	if got := srv.Replies(); !slices.Equal(got, want) {
 		t.Fatalf("option replies = %v, want %v", got, want)
@@ -66,7 +67,7 @@ func TestTelnetLinePasswordAndEnable(t *testing.T) {
 }
 
 func TestTelnetUsernameAndPassword(t *testing.T) {
-	srv := startTelnetServer(t, telnetServerOptions{username: "backup", password: "pw", device: simpleDevice()})
+	srv := testutil.StartTelnetServer(t, testutil.TelnetServerOptions{Username: "backup", Password: "pw", Device: testutil.SimpleDevice()})
 	out, err := telnetShowRun(t, srv, shell.Login{Username: "backup", Password: "pw"}, "")
 	if err != nil {
 		t.Fatalf("collect: %v", err)
@@ -77,13 +78,13 @@ func TestTelnetUsernameAndPassword(t *testing.T) {
 }
 
 func TestTelnetWrongPassword(t *testing.T) {
-	for name, o := range map[string]telnetServerOptions{
-		"line password": {password: "right"},
-		"username":      {username: "backup", password: "right"},
+	for name, o := range map[string]testutil.TelnetServerOptions{
+		"line password": {Password: "right"},
+		"username":      {Username: "backup", Password: "right"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			o.device = simpleDevice()
-			srv := startTelnetServer(t, o)
+			o.Device = testutil.SimpleDevice()
+			srv := testutil.StartTelnetServer(t, o)
 			_, err := telnetShowRun(t, srv, shell.Login{Username: "backup", Password: "wrong"}, "")
 			if !errors.Is(err, shell.ErrLogin) {
 				t.Fatalf("want ErrLogin, got %v", err)
@@ -99,7 +100,7 @@ func TestTelnetWrongPassword(t *testing.T) {
 }
 
 func TestTelnetUsernameRequiredButMissing(t *testing.T) {
-	srv := startTelnetServer(t, telnetServerOptions{username: "backup", password: "pw", device: simpleDevice()})
+	srv := testutil.StartTelnetServer(t, testutil.TelnetServerOptions{Username: "backup", Password: "pw", Device: testutil.SimpleDevice()})
 	_, err := telnetShowRun(t, srv, shell.Login{Password: "pw"}, "")
 	if !errors.Is(err, shell.ErrLogin) {
 		t.Fatalf("want ErrLogin, got %v", err)
@@ -113,8 +114,8 @@ func TestTelnetConnectionRefused(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	ln.Close()
-	h, p := hostPort(t, addr)
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	h, p := testutil.HostPort(t, addr)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	_, err = telnet.Dial(ctx, h, p)
 	if !errors.Is(err, telnet.ErrConnect) {
@@ -134,7 +135,7 @@ func TestTelnetDataEncoding(t *testing.T) {
 	defer server.Close()
 
 	go func() {
-		_, _ = server.Write([]byte{'a', tnIAC, tnIAC, 'b', '\r', 0, 'c', '\r', '\n'})
+		_, _ = server.Write([]byte{'a', testutil.IAC, testutil.IAC, 'b', '\r', 0, 'c', '\r', '\n'})
 	}()
 	got := make([]byte, 0, 16)
 	buf := make([]byte, 16)
@@ -145,12 +146,12 @@ func TestTelnetDataEncoding(t *testing.T) {
 		}
 		got = append(got, buf[:n]...)
 	}
-	if want := []byte{'a', tnIAC, 'b', '\r', 'c', '\r', '\n'}; !bytes.Equal(got, want) {
+	if want := []byte{'a', testutil.IAC, 'b', '\r', 'c', '\r', '\n'}; !bytes.Equal(got, want) {
 		t.Fatalf("read %v, want %v", got, want)
 	}
 
 	go func() { _, _ = io.WriteString(conn, "x\xffy\n") }()
-	want := []byte{'x', tnIAC, tnIAC, 'y', '\r', '\n'}
+	want := []byte{'x', testutil.IAC, testutil.IAC, 'y', '\r', '\n'}
 	sent := make([]byte, len(want))
 	if _, err := io.ReadFull(server, sent); err != nil {
 		t.Fatal(err)
@@ -162,8 +163,8 @@ func TestTelnetDataEncoding(t *testing.T) {
 
 // The inventory path: a telnet device needs no known_hosts and no username.
 func TestCollectOverTelnetFromInventory(t *testing.T) {
-	dev := &fakeDevice{hostname: "sw1", enablePassword: "en-pw", commands: map[string]string{"show running-config": ciscoRunning}}
-	srv := startTelnetServer(t, telnetServerOptions{password: "line-pw", device: dev})
+	dev := &testutil.FakeDevice{Hostname: "sw1", EnablePassword: "en-pw", Commands: map[string]string{"show running-config": testutil.CiscoRunning}}
+	srv := testutil.StartTelnetServer(t, testutil.TelnetServerOptions{Password: "line-pw", Device: dev})
 	dir := t.TempDir()
 	write := func(name, s string) string {
 		p := filepath.Join(dir, name)
@@ -172,8 +173,8 @@ func TestCollectOverTelnetFromInventory(t *testing.T) {
 		}
 		return p
 	}
-	h, p := hostPort(t, srv.addr)
-	invPath := writeInventory(t, fmt.Sprintf(`
+	h, p := testutil.HostPort(t, srv.Addr)
+	invPath := testutil.WriteInventory(t, fmt.Sprintf(`
 credentials:
   line:
     password: {file: %s}
@@ -189,7 +190,7 @@ devices:
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	files, err := (&collect.Collector{Inventory: inv, Drivers: reg}).Collect(ctx, inv.Devices[0])
 	if err != nil {

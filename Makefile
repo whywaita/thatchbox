@@ -8,12 +8,15 @@ test:
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o thatchbox ./cmd/thatchbox
 check:
-	test -z "$$(gofmt -l cmd internal tests)"
+	test -z "$$(gofmt -l .)"
 	go vet ./...
 	go test -race ./...
-# Tests live in tests/, so coverage is measured across every package.
+# Packages are also exercised by their neighbours' tests (collect drives
+# sshdial, telnet and shell), so coverage counts every package except the
+# test fakes.
+COVERPKG = $(shell go list ./... | grep -v /internal/testutil | paste -sd, -)
 cover:
-	go test -coverpkg=./... -coverprofile=coverage.out ./...
+	go test -coverpkg=$(COVERPKG) -coverprofile=coverage.out ./...
 # Release archives and their checksums in dist/.
 dist:
 	rm -rf dist && mkdir -p dist

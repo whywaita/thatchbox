@@ -1,4 +1,4 @@
-package tests
+package inventory_test
 
 import (
 	"errors"
@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/whywaita/thatchbox/internal/inventory"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 func TestInventoryEmptyUsesBuiltinDefaults(t *testing.T) {
-	inv, err := inventory.Load(writeInventory(t, "devices: []\n"), knownDrivers)
+	inv, err := inventory.Load(testutil.WriteInventory(t, "devices: []\n"), testutil.KnownDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ devices:
   - {name: a, address: a, driver: junos, credential: c}
   - {name: b, address: b, driver: junos, credential: c, port: 22, known_hosts: /k/b, min_size_ratio: 0, ssh: {ciphers: [aes256-ctr]}}
 `
-	inv, err := inventory.Load(writeInventory(t, body), knownDrivers)
+	inv, err := inventory.Load(testutil.WriteInventory(t, body), testutil.KnownDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestInventoryRejectsMore(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := inventory.Load(writeInventory(t, body), knownDrivers); err == nil {
+			if _, err := inventory.Load(testutil.WriteInventory(t, body), testutil.KnownDrivers); err == nil {
 				t.Fatal("expected error")
 			}
 		})
@@ -94,7 +95,7 @@ func TestInventoryReportsAllErrors(t *testing.T) {
 	body := "credentials:\n  c: {username: u, password: {env: X}}\ndevices:\n" +
 		"  - {name: a, driver: nosuch, credential: c, known_hosts: /k}\n" +
 		"  - {name: b, address: b, driver: junos, credential: nope, known_hosts: /k}\n"
-	_, err := inventory.Load(writeInventory(t, body), knownDrivers)
+	_, err := inventory.Load(testutil.WriteInventory(t, body), testutil.KnownDrivers)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -106,7 +107,7 @@ func TestInventoryReportsAllErrors(t *testing.T) {
 }
 
 func TestInventoryLoadMissingFile(t *testing.T) {
-	if _, err := inventory.Load(filepath.Join(t.TempDir(), "missing.yaml"), knownDrivers); err == nil {
+	if _, err := inventory.Load(filepath.Join(t.TempDir(), "missing.yaml"), testutil.KnownDrivers); err == nil {
 		t.Fatal("missing file accepted")
 	}
 }

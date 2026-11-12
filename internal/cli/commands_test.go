@@ -1,4 +1,4 @@
-package tests
+package cli_test
 
 import (
 	"bytes"
@@ -9,16 +9,8 @@ import (
 	"testing"
 
 	"github.com/whywaita/thatchbox/internal/cli"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
-
-func writeFile(t *testing.T, name string, data []byte) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(p, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
 
 func TestCLIVersion(t *testing.T) {
 	var out bytes.Buffer
@@ -87,7 +79,7 @@ func TestCLIValidateErrors(t *testing.T) {
 		"no inventory":      {"validate"},
 		"missing inventory": {"validate", "--inventory", filepath.Join(t.TempDir(), "missing.yaml")},
 		"unknown flag":      {"validate", "--nosuch"},
-		"bad drivers dir":   {"validate", "--inventory", "../examples/inventory.yaml", "--drivers", filepath.Join(t.TempDir(), "missing")},
+		"bad drivers dir":   {"validate", "--inventory", "../../examples/inventory.yaml", "--drivers", filepath.Join(t.TempDir(), "missing")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -99,18 +91,18 @@ func TestCLIValidateErrors(t *testing.T) {
 }
 
 func TestCLIRunFlagErrors(t *testing.T) {
-	key, _ := clientKey(t, "")
-	keyFile := writeFile(t, "key", key)
-	knownHosts := writeFile(t, "known_hosts", nil)
-	inv := writeInventory(t, validInventory)
-	remote := newRemote(t)
+	key, _ := testutil.ClientKey(t, "")
+	keyFile := testutil.WriteFile(t, "key", key)
+	knownHosts := testutil.WriteFile(t, "known_hosts", nil)
+	inv := testutil.WriteInventory(t, testutil.ValidInventory)
+	remote := testutil.NewRemote(t)
 	cases := map[string][]string{
 		"unknown flag":            {"run", "--nosuch"},
 		"bad log level":           {"run", "--inventory", inv, "--repo", remote, "--log-level", "loud"},
 		"no repo":                 {"run", "--inventory", inv},
 		"no inventory":            {"run", "--repo", remote},
 		"key without known_hosts": {"run", "--inventory", inv, "--repo", remote, "--git-ssh-key", keyFile},
-		"unreadable key":          {"run", "--inventory", inv, "--repo", remote, "--git-ssh-key", writeFile(t, "bad", []byte("not a key")), "--git-known-hosts", knownHosts},
+		"unreadable key":          {"run", "--inventory", inv, "--repo", remote, "--git-ssh-key", testutil.WriteFile(t, "bad", []byte("not a key")), "--git-known-hosts", knownHosts},
 		"missing known_hosts":     {"run", "--inventory", inv, "--repo", remote, "--git-ssh-key", keyFile, "--git-known-hosts", filepath.Join(t.TempDir(), "missing")},
 		"unreachable remote":      {"run", "--inventory", inv, "--repo", filepath.Join(t.TempDir(), "no-such-remote")},
 	}
@@ -128,15 +120,15 @@ func TestCLIRunFlagErrors(t *testing.T) {
 // accepts a git SSH key (a local remote does not use it).
 func TestCLIRunAllDevicesOK(t *testing.T) {
 	t.Setenv("TB_CLI_PASSWORD", "pw")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	inv := cliInventory(t, writeKnownHosts(t, srv), srv)
-	key, _ := clientKey(t, "")
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	inv := cliInventory(t, testutil.WriteKnownHosts(t, srv), srv)
+	key, _ := testutil.ClientKey(t, "")
 	workdir := filepath.Join(t.TempDir(), "work")
 
 	var out bytes.Buffer
 	code := cli.Main([]string{
-		"run", "--inventory", inv, "--repo", newRemote(t), "--workdir", workdir,
-		"--git-ssh-key", writeFile(t, "key", key), "--git-known-hosts", writeFile(t, "known_hosts", nil),
+		"run", "--inventory", inv, "--repo", testutil.NewRemote(t), "--workdir", workdir,
+		"--git-ssh-key", testutil.WriteFile(t, "key", key), "--git-known-hosts", testutil.WriteFile(t, "known_hosts", nil),
 		"--author-name", "bot", "--author-email", "bot@example.invalid", "--log-level", "debug",
 	}, &out)
 	if code != cli.ExitOK {
@@ -151,9 +143,9 @@ func TestCLIRunAllDevicesOK(t *testing.T) {
 // fatal, not a device failure.
 func TestCLIRunCorruptStatusIsFatal(t *testing.T) {
 	t.Setenv("TB_CLI_PASSWORD", "pw")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
-	inv := cliInventory(t, writeKnownHosts(t, srv), srv)
-	remote := remoteWithStatus(t, "{")
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
+	inv := cliInventory(t, testutil.WriteKnownHosts(t, srv), srv)
+	remote := testutil.RemoteWithStatus(t, "{")
 	var out bytes.Buffer
 	if code := cli.Main([]string{"run", "--inventory", inv, "--repo", remote}, &out); code != cli.ExitFatal {
 		t.Fatalf("exit %d:\n%s", code, out.String())

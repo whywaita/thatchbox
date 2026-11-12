@@ -152,7 +152,7 @@ A collection is committed only when all of these hold; otherwise the previous fi
 
 ## Tests
 
-All tests live in `tests/` and need no network or external services: SSH devices and jump hosts are simulated by an in-process SSH server, telnet devices by an in-process telnet server, and the git remote is a local bare repository.
+Each package carries its own tests (`internal/<package>/*_test.go`, as external `<package>_test` packages). They need no network or external services: SSH devices and jump hosts are simulated by an in-process SSH server, telnet devices by an in-process telnet server, and the git remote is a local bare repository. These fakes are shared through `internal/testutil`, which only tests import.
 
 ```sh
 make check     # gofmt, go vet, go test -race ./...

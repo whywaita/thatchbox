@@ -1,52 +1,20 @@
-package tests
+package store_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/whywaita/thatchbox/internal/store"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
-
-// storeAt clones remote into dir on branch.
-func storeAt(t *testing.T, remote, dir, branch string) *store.Repo {
-	t.Helper()
-	r, err := store.Clone(context.Background(), store.Options{
-		URL: remote, Dir: dir, Branch: branch,
-		AuthorName: "thatchbox", AuthorEmail: "thatchbox@example.invalid",
-	})
-	if err != nil {
-		t.Fatalf("Clone: %v", err)
-	}
-	return r
-}
-
-// remoteWithStatus returns a remote whose main branch holds status.json
-// with exactly content.
-func remoteWithStatus(t *testing.T, content string) string {
-	t.Helper()
-	remote := newRemote(t)
-	dir := filepath.Join(t.TempDir(), "work")
-	r := storeAt(t, remote, dir, "main")
-	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.Commit("status"); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Push(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	return remote
-}
 
 // A remote with history but without the branch starts that branch afresh
 // and leaves the other branch alone.
 func TestStoreMissingBranchStartsNewHistory(t *testing.T) {
-	remote := newRemote(t)
-	main := openStore(t, remote)
+	remote := testutil.NewRemote(t)
+	main := testutil.OpenStore(t, remote)
 	if err := main.WriteDevice("sw1", map[string][]byte{"cfg": []byte("main\n")}); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +25,7 @@ func TestStoreMissingBranchStartsNewHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	other := storeAt(t, remote, filepath.Join(t.TempDir(), "work"), "backups")
+	other := testutil.StoreAt(t, remote, filepath.Join(t.TempDir(), "work"), "backups")
 	if files, err := other.ReadDevice("sw1"); err != nil || len(files) != 0 {
 		t.Fatalf("new branch is not empty: %v %v", files, err)
 	}
@@ -71,11 +39,11 @@ func TestStoreMissingBranchStartsNewHistory(t *testing.T) {
 		t.Fatalf("push new branch: %v", err)
 	}
 
-	again := storeAt(t, remote, filepath.Join(t.TempDir(), "work"), "backups")
+	again := testutil.StoreAt(t, remote, filepath.Join(t.TempDir(), "work"), "backups")
 	if files, _ := again.ReadDevice("sw2"); string(files["cfg"]) != "other\n" {
 		t.Fatalf("branch not pushed: %v", files)
 	}
-	if files, _ := openStore(t, remote).ReadDevice("sw1"); string(files["cfg"]) != "main\n" {
+	if files, _ := testutil.OpenStore(t, remote).ReadDevice("sw1"); string(files["cfg"]) != "main\n" {
 		t.Fatalf("main changed: %v", files)
 	}
 }
@@ -97,9 +65,9 @@ func TestStoreCloneErrors(t *testing.T) {
 // A push loses when the remote moved since the clone; the next run starts
 // from the new remote state.
 func TestStorePushRejectsMovedRemote(t *testing.T) {
-	remote := remoteWithStatus(t, `{"devices":{}}`+"\n")
-	a := openStore(t, remote)
-	b := openStore(t, remote)
+	remote := testutil.RemoteWithStatus(t, `{"devices":{}}`+"\n")
+	a := testutil.OpenStore(t, remote)
+	b := testutil.OpenStore(t, remote)
 	for i, r := range []*store.Repo{a, b} {
 		if err := r.WriteDevice("sw1", map[string][]byte{"cfg": []byte{byte('a' + i), '\n'}}); err != nil {
 			t.Fatal(err)
@@ -117,7 +85,7 @@ func TestStorePushRejectsMovedRemote(t *testing.T) {
 }
 
 func TestStorePushWithoutChangesIsNoop(t *testing.T) {
-	r := openStore(t, remoteWithStatus(t, `{"devices":{}}`+"\n"))
+	r := testutil.OpenStore(t, testutil.RemoteWithStatus(t, `{"devices":{}}`+"\n"))
 	if err := r.Push(context.Background()); err != nil {
 		t.Fatalf("up-to-date push: %v", err)
 	}
@@ -135,7 +103,7 @@ func TestStoreReadStatus(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			st, err := openStore(t, remoteWithStatus(t, c.content)).ReadStatus()
+			st, err := testutil.OpenStore(t, testutil.RemoteWithStatus(t, c.content)).ReadStatus()
 			if (err != nil) != c.wantErr {
 				t.Fatalf("err = %v", err)
 			}
@@ -150,7 +118,7 @@ func TestStoreReadStatus(t *testing.T) {
 }
 
 func TestStoreReadDeviceRejectsUnsafeName(t *testing.T) {
-	r := openStore(t, newRemote(t))
+	r := testutil.OpenStore(t, testutil.NewRemote(t))
 	for _, name := range []string{"", "../x", ".hidden", "a/b"} {
 		if _, err := r.ReadDevice(name); err == nil {
 			t.Errorf("ReadDevice(%q) accepted", name)
@@ -159,7 +127,7 @@ func TestStoreReadDeviceRejectsUnsafeName(t *testing.T) {
 }
 
 func TestStoreWriteDeviceRejectsBadPathsBeforeTouchingFiles(t *testing.T) {
-	r := openStore(t, newRemote(t))
+	r := testutil.OpenStore(t, testutil.NewRemote(t))
 	if err := r.WriteDevice("sw1", map[string][]byte{"cfg": []byte("keep\n")}); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +183,7 @@ func TestStatusEquivalent(t *testing.T) {
 }
 
 func TestStoreCommitWithoutChanges(t *testing.T) {
-	r := openStore(t, newRemote(t))
+	r := testutil.OpenStore(t, testutil.NewRemote(t))
 	committed, err := r.Commit("nothing")
 	if err != nil || committed {
 		t.Fatalf("empty commit: %v %v", committed, err)

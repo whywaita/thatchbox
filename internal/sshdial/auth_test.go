@@ -1,10 +1,7 @@
-package tests
+package sshdial_test
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -13,12 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/whywaita/thatchbox/internal/collect"
 	"github.com/whywaita/thatchbox/internal/driver"
 	"github.com/whywaita/thatchbox/internal/inventory"
 	"github.com/whywaita/thatchbox/internal/sshdial"
+	"github.com/whywaita/thatchbox/internal/testutil"
 )
 
 const (
@@ -27,42 +23,18 @@ const (
 	keyTimeout = 30 * time.Second
 )
 
-// clientKey returns a new key as an OpenSSH PEM (encrypted when passphrase
-// is set) and its public key.
-func clientKey(t *testing.T, passphrase string) ([]byte, ssh.PublicKey) {
+func keyTarget(t *testing.T, s *testutil.SSHServer, key []byte) sshdial.Target {
 	t.Helper()
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var block *pem.Block
-	if passphrase == "" {
-		block, err = ssh.MarshalPrivateKey(priv, "")
-	} else {
-		block, err = ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pem.EncodeToMemory(block), signer.PublicKey()
-}
-
-func keyTarget(t *testing.T, s *sshServer, key []byte) sshdial.Target {
-	t.Helper()
-	tgt := target(t, s, writeKnownHosts(t, s))
+	tgt := target(t, s, testutil.WriteKnownHosts(t, s))
 	tgt.Password = ""
 	tgt.PrivateKey = key
 	return tgt
 }
 
 func TestSSHPrivateKeyAuth(t *testing.T) {
-	key, pub := clientKey(t, "")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", authorizedKey: pub, device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	key, pub := testutil.ClientKey(t, "")
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", AuthorizedKey: pub, Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	out, err := runShowRun(t, ctx, keyTarget(t, srv, key), nil)
 	if err != nil {
@@ -74,10 +46,10 @@ func TestSSHPrivateKeyAuth(t *testing.T) {
 }
 
 func TestSSHPrivateKeyNotAuthorized(t *testing.T) {
-	_, pub := clientKey(t, "")
-	other, _ := clientKey(t, "")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", authorizedKey: pub, device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	_, pub := testutil.ClientKey(t, "")
+	other, _ := testutil.ClientKey(t, "")
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", AuthorizedKey: pub, Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	if _, err := sshdial.Open(ctx, keyTarget(t, srv, other), nil); !errors.Is(err, sshdial.ErrAuth) {
 		t.Fatalf("want ErrAuth, got %v", err)
@@ -87,11 +59,11 @@ func TestSSHPrivateKeyNotAuthorized(t *testing.T) {
 func TestSSHKeyWithPasswordFallback(t *testing.T) {
 	// A server that only accepts passwords: an offered key must not prevent
 	// password login.
-	key, _ := clientKey(t, "")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", device: simpleDevice()})
+	key, _ := testutil.ClientKey(t, "")
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", Device: testutil.SimpleDevice()})
 	tgt := keyTarget(t, srv, key)
 	tgt.Password = "pw"
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	if _, err := runShowRun(t, ctx, tgt, nil); err != nil {
 		t.Fatalf("password after rejected key: %v", err)
@@ -99,9 +71,9 @@ func TestSSHKeyWithPasswordFallback(t *testing.T) {
 }
 
 func TestSSHKeyAndPasswordBothRequired(t *testing.T) {
-	key, pub := clientKey(t, "")
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", authorizedKey: pub, requireBoth: true, device: simpleDevice()})
-	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	key, pub := testutil.ClientKey(t, "")
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", AuthorizedKey: pub, RequireBoth: true, Device: testutil.SimpleDevice()})
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ShortTimeout)
 	defer cancel()
 	tgt := keyTarget(t, srv, key)
 	if _, err := sshdial.Open(ctx, tgt, nil); !errors.Is(err, sshdial.ErrAuth) {
@@ -114,8 +86,8 @@ func TestSSHKeyAndPasswordBothRequired(t *testing.T) {
 }
 
 func TestSSHEncryptedPrivateKey(t *testing.T) {
-	key, pub := clientKey(t, testPassphrase)
-	srv := startSSHServer(t, sshServerOptions{user: "backup", authorizedKey: pub, device: simpleDevice()})
+	key, pub := testutil.ClientKey(t, testPassphrase)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", AuthorizedKey: pub, Device: testutil.SimpleDevice()})
 	ctx, cancel := context.WithTimeout(context.Background(), keyTimeout)
 	defer cancel()
 	tgt := keyTarget(t, srv, key)
@@ -135,8 +107,8 @@ func TestSSHEncryptedPrivateKey(t *testing.T) {
 // The inventory path: private_key, private_key_passphrase and password are
 // read from files and used together.
 func TestCollectWithKeyFromInventory(t *testing.T) {
-	key, pub := clientKey(t, testPassphrase)
-	srv := startSSHServer(t, sshServerOptions{user: "backup", password: "pw", authorizedKey: pub, requireBoth: true, device: simpleDevice()})
+	key, pub := testutil.ClientKey(t, testPassphrase)
+	srv := testutil.StartSSHServer(t, testutil.SSHServerOptions{User: "backup", Password: "pw", AuthorizedKey: pub, RequireBoth: true, Device: testutil.SimpleDevice()})
 	dir := t.TempDir()
 	write := func(name string, b []byte) string {
 		p := filepath.Join(dir, name)
@@ -145,8 +117,8 @@ func TestCollectWithKeyFromInventory(t *testing.T) {
 		}
 		return p
 	}
-	h, p := hostPort(t, srv.addr)
-	invPath := writeInventory(t, fmt.Sprintf(`
+	h, p := testutil.HostPort(t, srv.Addr)
+	invPath := testutil.WriteInventory(t, fmt.Sprintf(`
 defaults: {known_hosts: %s}
 credentials:
   lab:
@@ -156,7 +128,7 @@ credentials:
     private_key_passphrase: {file: %s}
 devices:
   - {name: sw1, address: %s, port: %d, driver: cisco_ios, credential: lab}
-`, writeKnownHosts(t, srv), write("pw", []byte("pw\n")), write("key", key), write(testPassphrase, []byte(testPassphrase+"\n")), h, p))
+`, testutil.WriteKnownHosts(t, srv), write("pw", []byte("pw\n")), write("key", key), write(testPassphrase, []byte(testPassphrase+"\n")), h, p))
 	reg, err := driver.Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -177,9 +149,9 @@ devices:
 }
 
 func TestInventoryRejectsPassphraseWithoutKey(t *testing.T) {
-	body := strings.Replace(validInventory, "enable_password: {file: /run/secrets/enable}",
+	body := strings.Replace(testutil.ValidInventory, "enable_password: {file: /run/secrets/enable}",
 		"private_key_passphrase: {file: /run/secrets/phrase}", 1)
-	if _, err := inventory.Load(writeInventory(t, body), knownDrivers); err == nil {
+	if _, err := inventory.Load(testutil.WriteInventory(t, body), testutil.KnownDrivers); err == nil {
 		t.Fatal("passphrase without private_key accepted")
 	}
 }
